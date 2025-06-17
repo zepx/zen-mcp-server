@@ -538,35 +538,8 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
         if model_option:
             logger.debug(f"Parsed model format - model: '{model_name}', option: '{model_option}'")
 
-        # Special handling for consensus tool which handles multiple models
-        if name == "consensus" and "models" in arguments:
-            # Parse each model in the models list for consensus
-            parsed_models = []
-            for model_entry in arguments.get("models", []):
-                parsed_model_name, parsed_option = parse_model_option(model_entry)
-                parsed_models.append({"model": parsed_model_name, "option": parsed_option})
-
-            # Store parsed models information for consensus tool
-            arguments["_parsed_models"] = parsed_models
-            logger.debug(f"Consensus tool: parsed {len(parsed_models)} models with options")
-
-            # Set up model context for consensus (using default model for base class compatibility)
-            model_context = ModelContext(model_name, model_option)
-            arguments["_model_context"] = model_context
-            arguments["_resolved_model_name"] = model_name
-            logger.debug(f"Model context created for consensus with default model {model_name}")
-
-            # Execute consensus tool with proper context setup
-            result = await tool.execute(arguments)
-            logger.info(f"Tool '{name}' execution completed")
-
-            # Log completion to activity file
-            try:
-                mcp_activity_logger = logging.getLogger("mcp_activity")
-                mcp_activity_logger.info(f"TOOL_COMPLETED: {name}")
-            except Exception:
-                pass
-            return result
+        # Consensus tool handles its own model configuration validation
+        # No special handling needed at server level
 
         # Handle auto mode at MCP boundary - resolve to specific model
         if model_name.lower() == "auto":

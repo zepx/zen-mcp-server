@@ -21,15 +21,26 @@ class TestConsensusStance(BaseSimulatorTest):
     def run_test(self) -> bool:
         """Run consensus stance test"""
         try:
-            self.logger.info("Testing consensus tool with explicit flash:for and flash:against stances")
+            self.logger.info("Testing consensus tool with ModelConfig objects and custom stance prompts")
 
-            # Send request with explicit stances as user requested
+            # Send request with new ModelConfig format
             # Using shorter prompt to stay within subprocess timeout limits
             response, continuation_id = self.call_mcp_tool(
                 "consensus",
                 {
                     "prompt": "Add pizza button: good idea?",
-                    "models": ["flash:for", "flash:against"],
+                    "models": [
+                        {
+                            "model": "flash",
+                            "stance": "for",
+                            "stance_prompt": "Focus on user engagement and potential benefits this feature could bring to enterprise users.",
+                        },
+                        {
+                            "model": "flash",
+                            "stance": "against",
+                            "stance_prompt": "Focus on technical complexity, maintenance overhead, and potential scope creep issues.",
+                        },
+                    ],
                     "model": "flash",  # Default model for Claude's synthesis
                 },
             )
@@ -145,7 +156,18 @@ class TestConsensusStance(BaseSimulatorTest):
                 "consensus",
                 {
                     "prompt": "Real-time notifications: worth it?",
-                    "models": ["o3:support", "pro:oppose"],
+                    "models": [
+                        {
+                            "model": "o3",
+                            "stance": "support",  # Test synonym
+                            "stance_prompt": "Emphasize benefits for user experience and business value.",
+                        },
+                        {
+                            "model": "pro",
+                            "stance": "oppose",  # Test synonym
+                            "stance_prompt": "Focus on potential downsides and implementation challenges.",
+                        },
+                    ],
                     "model": "flash",
                 },
             )

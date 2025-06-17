@@ -8,6 +8,7 @@ Each test is in its own file for better organization and maintainability.
 from .base_test import BaseSimulatorTest
 from .test_basic_conversation import BasicConversationTest
 from .test_consensus_stance import TestConsensusStance
+from .test_consensus_three_models import TestConsensusThreeModels
 from .test_content_validation import ContentValidationTest
 from .test_conversation_chain_validation import ConversationChainValidationTest
 from .test_cross_tool_comprehensive import CrossToolComprehensiveTest
@@ -50,6 +51,7 @@ TEST_REGISTRY = {
     "vision_capability": VisionCapabilityTest,
     "xai_models": XAIModelsTest,
     "consensus_stance": TestConsensusStance,
+    "consensus_three_models": TestConsensusThreeModels,
     # "o3_pro_expensive": O3ProExpensiveTest,  # COMMENTED OUT - too expensive to run by default
 }
 
@@ -76,5 +78,6 @@ __all__ = [
     "VisionCapabilityTest",
     "XAIModelsTest",
     "TestConsensusStance",
+    "TestConsensusThreeModels",
     "TEST_REGISTRY",
 ]

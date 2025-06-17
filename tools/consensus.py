@@ -8,7 +8,7 @@ import logging
 from typing import TYPE_CHECKING, Any, Optional
 
 from mcp.types import TextContent
-from pydantic import Field, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 if TYPE_CHECKING:
     from tools.models import ToolModelCategory
@@ -21,6 +21,28 @@ from .base import BaseTool, ToolRequest
 logger = logging.getLogger(__name__)
 
 
+class ModelConfig(BaseModel):
+    """Enhanced model configuration for consensus tool"""
+
+    model: str = Field(..., description="Model name to use (e.g., 'o3', 'flash', 'pro')")
+    stance: Optional[str] = Field(
+        default="neutral",
+        description=(
+            "Stance for this model. Supportive: 'for', 'support', 'favor'. "
+            "Critical: 'against', 'oppose', 'critical'. Neutral: 'neutral'. "
+            "Defaults to 'neutral'."
+        ),
+    )
+    stance_prompt: Optional[str] = Field(
+        default=None,
+        description=(
+            "Custom stance-specific instructions for this model. "
+            "If provided, this will be used instead of the default stance prompt. "
+            "Should be clear, specific instructions about how this model should approach the analysis."
+        ),
+    )
+
+
 class ConsensusRequest(ToolRequest):
     """Request model for consensus tool"""
 
@@ -31,13 +53,12 @@ class ConsensusRequest(ToolRequest):
             "Be as detailed as possible about the proposal, plan, or idea you want multiple perspectives on."
         ),
     )
-    models: list[str] = Field(
+    models: list[ModelConfig] = Field(
         ...,
         description=(
-            "List of models to consult for consensus. Format: 'model' for neutral or 'model:stance' for positioned analysis. "
-            "ONLY these stance words are supported - Supportive: 'for', 'support', 'favor'. Critical: 'against', 'oppose', 'critical'. "
-            "Examples: 'o3:for', 'pro:support', 'grok:favor' (supportive); 'o3:against', 'pro:oppose', 'grok:critical' (critical); "
-            "'o3', 'pro', 'grok-3' (neutral). Default to neutral unless user requests debate format or you've asked and they agreed. "
+            "List of model configurations for consensus analysis. Each model can have a specific stance and custom instructions. "
+            "Example: [{'model': 'o3', 'stance': 'for', 'stance_prompt': 'Focus on benefits and opportunities...'}, "
+            "{'model': 'flash', 'stance': 'against', 'stance_prompt': 'Identify risks and challenges...'}]. "
             "Maximum 2 instances per model+stance combination."
         ),
     )
@@ -57,7 +78,7 @@ class ConsensusRequest(ToolRequest):
         description="Specific aspects to focus on (e.g., 'performance', 'security', 'user experience')",
     )
 
-    @field_validator("models", mode="before")
+    @field_validator("models")
     @classmethod
     def validate_models_not_empty(cls, v):
         if not v:
@@ -78,12 +99,11 @@ class ConsensusTool(BaseTool):
         return (
             "MULTI-MODEL CONSENSUS - Gather diverse perspectives from multiple AI models on technical proposals, "
             "plans, and ideas. Perfect for validation, feasibility assessment, and getting comprehensive "
-            "viewpoints on complex decisions. Supports optional stance steering to create structured debates. "
-            "Only apply stances when the user explicitly requests opposing views OR when you determine that "
-            "contrasting perspectives would add significant value to the analysis. In such cases, consider "
-            "asking the user: 'Would you like me to have one model argue strongly in favor and another "
-            "against, to better explore the tradeoffs?' Use neutral stances by default unless there's clear "
-            "benefit to debate format."
+            "viewpoints on complex decisions. Supports advanced stance steering with custom instructions for each model. "
+            "You can specify different stances (for/against/neutral) and provide custom stance prompts to guide each "
+            "model's analysis. Example: [{'model': 'o3', 'stance': 'for', 'stance_prompt': 'Focus on implementation "
+            "benefits and user value'}, {'model': 'flash', 'stance': 'against', 'stance_prompt': 'Identify potential "
+            "risks and technical challenges'}]. Use neutral stances by default unless structured debate would add value."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -99,12 +119,30 @@ class ConsensusTool(BaseTool):
                 },
                 "models": {
                     "type": "array",
-                    "items": {"type": "string"},
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "model": {
+                                "type": "string",
+                                "description": "Model name to use (e.g., 'o3', 'flash', 'pro')",
+                            },
+                            "stance": {
+                                "type": "string",
+                                "enum": ["for", "support", "favor", "against", "oppose", "critical", "neutral"],
+                                "description": "Stance for this model: supportive ('for', 'support', 'favor'), critical ('against', 'oppose', 'critical'), or 'neutral'",
+                                "default": "neutral",
+                            },
+                            "stance_prompt": {
+                                "type": "string",
+                                "description": "Custom stance-specific instructions for this model. If provided, this will be used instead of the default stance prompt.",
+                            },
+                        },
+                        "required": ["model"],
+                    },
                     "description": (
-                        "List of models to consult for consensus. Format: 'model' for neutral or 'model:stance' for positioned analysis. "
-                        "ONLY these stance words are supported - Supportive: 'for', 'support', 'favor'. Critical: 'against', 'oppose', 'critical'. "
-                        "Examples: 'o3:for', 'pro:support', 'grok:favor' (supportive); 'o3:against', 'pro:oppose', 'grok:critical' (critical); "
-                        "'o3', 'pro', 'grok-3' (neutral). Default to neutral unless user requests debate format or you've asked and they agreed. "
+                        "List of model configurations for consensus analysis. Each model can have a specific stance and custom instructions. "
+                        "Example: [{'model': 'o3', 'stance': 'for', 'stance_prompt': 'Focus on benefits and opportunities...'}, "
+                        "{'model': 'flash', 'stance': 'against', 'stance_prompt': 'Identify risks and challenges...'}]. "
                         "Maximum 2 instances per model+stance combination."
                     ),
                 },
@@ -239,81 +277,86 @@ class ConsensusTool(BaseTool):
 
         return parts
 
-    def _parse_model_and_stance(self, model_entry: str) -> tuple[str, str]:
-        """Parse model entry like 'o3:against' into model and stance."""
-        # Import the generic parser from server
-        from server import parse_model_option
+    def _normalize_stance(self, stance: Optional[str]) -> str:
+        """Normalize stance to canonical form."""
+        if not stance:
+            return "neutral"
+
+        stance = stance.lower()
 
         # Define stance synonyms
         supportive_stances = {"for", "support", "favor"}
         critical_stances = {"against", "oppose", "critical"}
 
-        # Use the generic parser
-        model_name, stance = parse_model_option(model_entry)
-
-        if not model_name:
-            return None, "model name cannot be empty"
-
-        # If no stance provided, default to neutral
-        if not stance:
-            return model_name, "neutral"
-
-        # Normalize stance to lowercase
-        stance = stance.lower()
-
         # Map synonyms to canonical stance
         if stance in supportive_stances:
-            stance = "for"
+            return "for"
         elif stance in critical_stances:
-            stance = "against"
+            return "against"
         elif stance == "neutral":
-            pass  # Already neutral
+            return "neutral"
         else:
-            return (
-                None,
-                f"invalid stance '{stance}' (must be one of: {', '.join(sorted(supportive_stances | critical_stances))}, or omitted for neutral)",
+            # Unknown stances default to neutral for robustness
+            logger.warning(
+                f"Unknown stance '{stance}' provided, defaulting to 'neutral'. Valid stances: {', '.join(sorted(supportive_stances | critical_stances))}, or 'neutral'"
             )
+            return "neutral"
 
-        return model_name, stance
-
-    def _validate_model_combinations(self, model_entries: list[str]) -> tuple[list[tuple[str, str]], list[str]]:
-        """Validate model+stance combinations and enforce limits.
+    def _validate_model_combinations(self, model_configs: list[ModelConfig]) -> tuple[list[ModelConfig], list[str]]:
+        """Validate model configurations and enforce limits.
 
         Returns:
-            tuple: (valid_combinations, skipped_entries)
-            - Each combination can appear max 2 times
+            tuple: (valid_configs, skipped_entries)
+            - Each model+stance combination can appear max 2 times
             - Same model+stance limited to 2 instances
         """
-        valid_combinations = []
+        valid_configs = []
         skipped_entries = []
         combination_counts = {}  # Track (model, stance) -> count
 
-        for entry in model_entries:
-            result = self._parse_model_and_stance(entry)
-            if result[0] is None:
-                # Invalid stance - add to skipped entries
-                skipped_entries.append(f"{entry} ({result[1]})")
-                continue
+        for config in model_configs:
+            try:
+                # Normalize stance
+                normalized_stance = self._normalize_stance(config.stance)
 
-            model_name, stance = result
-            combination_key = (model_name, stance)
-
-            current_count = combination_counts.get(combination_key, 0)
-            if current_count >= DEFAULT_CONSENSUS_MAX_INSTANCES_PER_COMBINATION:
-                # Already have max instances of this model+stance combination
-                skipped_entries.append(
-                    f"{model_name}:{stance} (max {DEFAULT_CONSENSUS_MAX_INSTANCES_PER_COMBINATION} instances)"
+                # Create normalized config
+                normalized_config = ModelConfig(
+                    model=config.model, stance=normalized_stance, stance_prompt=config.stance_prompt
                 )
+
+                combination_key = (config.model, normalized_stance)
+                current_count = combination_counts.get(combination_key, 0)
+
+                if current_count >= DEFAULT_CONSENSUS_MAX_INSTANCES_PER_COMBINATION:
+                    # Already have max instances of this model+stance combination
+                    skipped_entries.append(
+                        f"{config.model}:{normalized_stance} (max {DEFAULT_CONSENSUS_MAX_INSTANCES_PER_COMBINATION} instances)"
+                    )
+                    continue
+
+                combination_counts[combination_key] = current_count + 1
+                valid_configs.append(normalized_config)
+
+            except ValueError as e:
+                # Invalid stance or model
+                skipped_entries.append(f"{config.model} ({str(e)})")
                 continue
 
-            combination_counts[combination_key] = current_count + 1
-            valid_combinations.append((model_name, stance))
+        return valid_configs, skipped_entries
 
-        return valid_combinations, skipped_entries
-
-    def _get_stance_enhanced_prompt(self, stance: str) -> str:
+    def _get_stance_enhanced_prompt(self, stance: str, custom_stance_prompt: Optional[str] = None) -> str:
         """Get the system prompt with stance injection based on the stance."""
         base_prompt = self.get_system_prompt()
+
+        # If custom stance prompt is provided, use it instead of default
+        if custom_stance_prompt:
+            # Validate stance placeholder exists exactly once
+            if base_prompt.count("{stance_prompt}") != 1:
+                raise ValueError(
+                    "System prompt must contain exactly one '{stance_prompt}' placeholder, "
+                    f"found {base_prompt.count('{stance_prompt}')}"
+                )
+            return base_prompt.replace("{stance_prompt}", custom_stance_prompt)
 
         stance_prompts = {
             "for": """SUPPORTIVE PERSPECTIVE WITH INTEGRITY
@@ -395,64 +438,109 @@ of the evidence, even when it strongly points in one direction.""",
         return base_prompt.replace("{stance_prompt}", stance_prompt)
 
     def _get_single_response(
-        self, provider, model_name: str, stance: str, prompt: str, request: ConsensusRequest
+        self, provider, model_config: ModelConfig, prompt: str, request: ConsensusRequest
     ) -> dict[str, Any]:
         """Get response from a single model with MCP-safe synchronous processing."""
-        logger.debug(f"Getting response from {model_name} with stance '{stance}'")
+        logger.debug(f"Getting response from {model_config.model} with stance '{model_config.stance}'")
 
         try:
             # Direct synchronous call, no async complexity or threading
             # Rate limiting removed for simplicity - sequential processing provides natural rate limiting
             response = provider.generate_content(
                 prompt=prompt,
-                model_name=model_name,
-                system_prompt=self._get_stance_enhanced_prompt(stance),
+                model_name=model_config.model,
+                system_prompt=self._get_stance_enhanced_prompt(model_config.stance, model_config.stance_prompt),
                 temperature=getattr(request, "temperature", None) or self.get_default_temperature(),
                 thinking_mode=getattr(request, "thinking_mode", "medium"),
                 images=getattr(request, "images", None) or [],
             )
             return {
-                "model": model_name,
-                "stance": stance,
+                "model": model_config.model,
+                "stance": model_config.stance,
                 "status": "success",
                 "verdict": response.content,  # Contains structured Markdown
                 "metadata": {
                     "provider": getattr(provider.get_provider_type(), "value", provider.get_provider_type()),
                     "usage": response.usage if hasattr(response, "usage") else None,
+                    "custom_stance_prompt": bool(model_config.stance_prompt),
                 },
             }
         except Exception as e:
-            logger.error(f"Error getting response from {model_name}:{stance}: {str(e)}")
-            return {"model": model_name, "stance": stance, "status": "error", "error": str(e)}
+            logger.error(f"Error getting response from {model_config.model}:{model_config.stance}: {str(e)}")
+            return {"model": model_config.model, "stance": model_config.stance, "status": "error", "error": str(e)}
 
     async def _get_consensus_responses(
-        self, providers_and_models: list[tuple], prompt: str, request: ConsensusRequest
+        self, provider_configs: list[tuple], prompt: str, request: ConsensusRequest
     ) -> list[dict[str, Any]]:
-        """Execute all model requests with MCP-safe sequential processing."""
+        """Execute all model requests with beautifully simple MCP-compatible processing."""
+
+        # For 2 models, try simple concurrent execution
+        # For more models, use sequential to be conservative
+        if len(provider_configs) <= 2:
+            logger.debug(f"Using concurrent processing for {len(provider_configs)} models")
+            return await self._get_responses_concurrent(provider_configs, prompt, request)
+        else:
+            logger.debug(f"Using sequential processing for {len(provider_configs)} models")
+            return await self._get_responses_sequential(provider_configs, prompt, request)
+
+    async def _get_responses_concurrent(
+        self, provider_configs: list[tuple], prompt: str, request: ConsensusRequest
+    ) -> list[dict[str, Any]]:
+        """Simple concurrent execution for small numbers of models."""
+
+        async def get_single_async(provider, model_config):
+            try:
+                # Wrap synchronous call in thread to avoid blocking
+                loop = asyncio.get_event_loop()
+                response = await loop.run_in_executor(
+                    None,  # Use default thread pool (simple and clean)
+                    self._get_single_response,
+                    provider,
+                    model_config,
+                    prompt,
+                    request,
+                )
+                return response
+            except Exception as e:
+                logger.error(f"Failed to get response from {model_config.model}:{model_config.stance}: {str(e)}")
+                return {
+                    "model": model_config.model,
+                    "stance": model_config.stance,
+                    "status": "error",
+                    "error": f"Unhandled exception: {str(e)}",
+                }
+
+        # Execute all models concurrently using asyncio.gather
+        tasks = [get_single_async(provider, model_config) for provider, model_config in provider_configs]
+        responses = await asyncio.gather(*tasks, return_exceptions=False)
+
+        logger.debug(f"Concurrent processing completed for {len(responses)} models")
+        return responses
+
+    async def _get_responses_sequential(
+        self, provider_configs: list[tuple], prompt: str, request: ConsensusRequest
+    ) -> list[dict[str, Any]]:
+        """Sequential processing for larger numbers of models."""
 
         responses = []
 
-        # MCP-SAFE: Simple sequential processing without thread pools
-        # This avoids event loop interference and is more reliable for MCP
-        for provider, model_name, stance in providers_and_models:
+        for provider, model_config in provider_configs:
             try:
-                logger.debug(f"Processing {model_name}:{stance} sequentially")
+                logger.debug(f"Processing {model_config.model}:{model_config.stance} sequentially")
 
                 # Direct synchronous call - simple and MCP-safe
-                # Sequential processing provides natural rate limiting
-                response = self._get_single_response(provider, model_name, stance, prompt, request)
+                response = self._get_single_response(provider, model_config, prompt, request)
                 responses.append(response)
 
                 # Brief yield to allow MCP to process any pending messages
-                # This is critical for MCP stability during long operations
-                await asyncio.sleep(0.2)
+                await asyncio.sleep(0.1)
 
             except Exception as e:
-                logger.error(f"Failed to get response from {model_name}:{stance}: {str(e)}")
+                logger.error(f"Failed to get response from {model_config.model}:{model_config.stance}: {str(e)}")
                 responses.append(
                     {
-                        "model": model_name,
-                        "stance": stance,
+                        "model": model_config.model,
+                        "stance": model_config.stance,
                         "status": "error",
                         "error": f"Unhandled exception: {str(e)}",
                     }
@@ -601,21 +689,8 @@ of the evidence, even when it strongly points in one direction.""",
         # Store arguments for base class methods
         self._current_arguments = arguments
 
-        # Check if we have pre-parsed models from server.py
-        if "_parsed_models" in arguments:
-            # Reconstruct the models list with stance format for validation
-            reconstructed_models = []
-            for pm in arguments["_parsed_models"]:
-                model = pm["model"]
-                option = pm["option"]
-                if option:
-                    reconstructed_models.append(f"{model}:{option}")
-                else:
-                    reconstructed_models.append(model)
-
-            # Update arguments with reconstructed models
-            arguments["models"] = reconstructed_models
-            logger.debug(f"Using pre-parsed models from server: {reconstructed_models}")
+        # Consensus tool now expects ModelConfig objects, not pre-parsed models from server
+        # The new architecture handles model:option parsing at the tool level instead
 
         # Validate and create request
         request = ConsensusRequest(**arguments)
@@ -628,15 +703,15 @@ of the evidence, even when it strongly points in one direction.""",
                 enhanced_prompt = f"{conversation_context}\n\n{request.prompt}"
                 request.prompt = enhanced_prompt
 
-        # Validate model+stance combinations and enforce limits
-        valid_combinations, skipped_entries = self._validate_model_combinations(request.models)
+        # Validate model configurations and enforce limits
+        valid_configs, skipped_entries = self._validate_model_combinations(request.models)
 
-        if not valid_combinations:
+        if not valid_configs:
             error_output = {
                 "status": "consensus_failed",
-                "error": "No valid model combinations after validation",
+                "error": "No valid model configurations after validation",
                 "models_skipped": skipped_entries,
-                "next_steps": "Please provide valid model specifications. Use format 'model' or 'model:stance' where stance is 'for' or 'against'.",
+                "next_steps": "Please provide valid model configurations with proper model names and stance values.",
             }
             return [TextContent(type="text", text=json.dumps(error_output, indent=2))]
 
@@ -646,33 +721,37 @@ of the evidence, even when it strongly points in one direction.""",
             from utils.model_context import ModelContext
 
             # Use the first model as the representative for token calculations
-            first_model = valid_combinations[0][0] if valid_combinations else "flash"
+            first_model = valid_configs[0].model if valid_configs else "flash"
             self._model_context = ModelContext(first_model)
 
         # Prepare the consensus prompt
         consensus_prompt = await self.prepare_prompt(request)
 
-        # Get providers for valid model combinations with caching to avoid duplicate lookups
-        providers_and_models = []
+        # Get providers for valid model configurations with caching to avoid duplicate lookups
+        provider_configs = []
         provider_cache = {}  # Cache to avoid duplicate provider lookups
 
-        for model_name, stance in valid_combinations:
+        for model_config in valid_configs:
             try:
                 # Check cache first
-                if model_name in provider_cache:
-                    provider = provider_cache[model_name]
+                if model_config.model in provider_cache:
+                    provider = provider_cache[model_config.model]
                 else:
                     # Look up provider and cache it
-                    provider = self.get_model_provider(model_name)
-                    provider_cache[model_name] = provider
+                    provider = self.get_model_provider(model_config.model)
+                    provider_cache[model_config.model] = provider
 
-                providers_and_models.append((provider, model_name, stance))
+                provider_configs.append((provider, model_config))
             except Exception as e:
                 # Track failed models
-                model_display = f"{model_name}:{stance}" if stance != "neutral" else model_name
+                model_display = (
+                    f"{model_config.model}:{model_config.stance}"
+                    if model_config.stance != "neutral"
+                    else model_config.model
+                )
                 skipped_entries.append(f"{model_display} (provider not available: {str(e)})")
 
-        if not providers_and_models:
+        if not provider_configs:
             error_output = {
                 "status": "consensus_failed",
                 "error": "No model providers available",
@@ -681,9 +760,9 @@ of the evidence, even when it strongly points in one direction.""",
             }
             return [TextContent(type="text", text=json.dumps(error_output, indent=2))]
 
-        # Send to all models asynchronously
-        logger.debug(f"Sending consensus request to {len(providers_and_models)} models")
-        responses = await self._get_consensus_responses(providers_and_models, consensus_prompt, request)
+        # Send to all models sequentially (MCP-safe)
+        logger.debug(f"Sending consensus request to {len(provider_configs)} models")
+        responses = await self._get_consensus_responses(provider_configs, consensus_prompt, request)
         logger.debug(f"Received {len(responses)} responses from consensus models")
 
         # Enforce minimum success requirement - must have at least 1 successful response
