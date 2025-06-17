@@ -308,6 +308,7 @@ and I need an expert opinion for the project I'm working on. Get a good idea of 
 and then debate with the other models to give me a final verdict
 ```
 
+
 **Key Features:**
 - Collaborative thinking partner for your analysis and planning
 - Get second opinions on your designs and approaches
@@ -361,6 +362,18 @@ provides significant value beyond just experimenting with different AI capabilit
 Perform a codereview with gemini pro and review auth.py for security issues and potential vulnerabilities.
 I need an actionable plan but break it down into smaller quick-wins that we can implement and test rapidly 
 ```
+
+### Pro Tip
+
+**You can start more than _one_ codereview sessions with Claude**:
+
+```
+Start separate sub-tasks for codereview one with o3 finding critical issues and one with flash finding low priority issues
+and quick-wins and give me the final single combined review highlighting only the critical issues 
+```
+
+The above prompt will simultaneously run two separate `codereview` tools with two separate models and combine the output
+into a single summary for you to consume.
 
 **Key Features:**
 - Issues prioritized by severity (🔴 CRITICAL → 🟢 LOW)

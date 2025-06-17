@@ -50,6 +50,7 @@ from tools import (
     AnalyzeTool,
     ChatTool,
     CodeReviewTool,
+    ConsensusTool,
     DebugIssueTool,
     ListModelsTool,
     Precommit,
@@ -157,6 +158,7 @@ TOOLS = {
     "debug": DebugIssueTool(),  # Root cause analysis and debugging assistance
     "analyze": AnalyzeTool(),  # General-purpose file and code analysis
     "chat": ChatTool(),  # Interactive development chat and brainstorming
+    "consensus": ConsensusTool(),  # Multi-model consensus for diverse perspectives on technical proposals
     "listmodels": ListModelsTool(),  # List all available AI models by provider
     "precommit": Precommit(),  # Pre-commit validation of git changes
     "testgen": TestGenerationTool(),  # Comprehensive test generation with edge case coverage
@@ -519,6 +521,67 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
     if name in TOOLS:
         logger.info(f"Executing tool '{name}' with {len(arguments)} parameter(s)")
         tool = TOOLS[name]
+
+        # EARLY MODEL RESOLUTION AT MCP BOUNDARY
+        # Resolve model before passing to tool - this ensures consistent model handling
+        from providers.registry import ModelProviderRegistry
+        from utils.file_utils import check_total_file_size
+        from utils.model_context import ModelContext
+
+        # Get model from arguments or use default
+        model_name = arguments.get("model") or DEFAULT_MODEL
+        logger.debug(f"Initial model for {name}: {model_name}")
+
+        # Handle auto mode at MCP boundary - resolve to specific model
+        if model_name.lower() == "auto":
+            # Get tool category to determine appropriate model
+            tool_category = tool.get_model_category()
+            resolved_model = ModelProviderRegistry.get_preferred_fallback_model(tool_category)
+            logger.info(f"Auto mode resolved to {resolved_model} for {name} (category: {tool_category.value})")
+            model_name = resolved_model
+            # Update arguments with resolved model
+            arguments["model"] = model_name
+
+        # Validate model availability at MCP boundary
+        provider = ModelProviderRegistry.get_provider_for_model(model_name)
+        if not provider:
+            # Get list of available models for error message
+            available_models = list(ModelProviderRegistry.get_available_models(respect_restrictions=True).keys())
+            tool_category = tool.get_model_category()
+            suggested_model = ModelProviderRegistry.get_preferred_fallback_model(tool_category)
+
+            error_message = (
+                f"Model '{model_name}' is not available with current API keys. "
+                f"Available models: {', '.join(available_models)}. "
+                f"Suggested model for {name}: '{suggested_model}' "
+                f"(category: {tool_category.value})"
+            )
+            error_output = ToolOutput(
+                status="error",
+                content=error_message,
+                content_type="text",
+                metadata={"tool_name": name, "requested_model": model_name},
+            )
+            return [TextContent(type="text", text=error_output.model_dump_json())]
+
+        # Create model context with resolved model
+        model_context = ModelContext(model_name)
+        arguments["_model_context"] = model_context
+        arguments["_resolved_model_name"] = model_name  # For backward compatibility during transition
+        logger.debug(
+            f"Model context created for {model_name} with {model_context.capabilities.context_window} token capacity"
+        )
+
+        # EARLY FILE SIZE VALIDATION AT MCP BOUNDARY
+        # Check file sizes before tool execution using resolved model
+        if "files" in arguments and arguments["files"]:
+            logger.debug(f"Checking file sizes for {len(arguments['files'])} files with model {model_name}")
+            file_size_check = check_total_file_size(arguments["files"], model_name)
+            if file_size_check:
+                logger.warning(f"File size check failed for {name} with model {model_name}")
+                return [TextContent(type="text", text=ToolOutput(**file_size_check).model_dump_json())]
+
+        # Execute tool with pre-resolved model context
         result = await tool.execute(arguments)
         logger.info(f"Tool '{name}' execution completed")
 
@@ -708,7 +771,12 @@ async def reconstruct_thread_context(arguments: dict[str, Any]) -> dict[str, Any
         # Capture files referenced in this turn
         user_files = arguments.get("files", [])
         logger.debug(f"[CONVERSATION_DEBUG] Adding user turn to thread {continuation_id}")
-        logger.debug(f"[CONVERSATION_DEBUG] User prompt length: {len(user_prompt)} chars")
+        from utils.token_utils import estimate_tokens
+
+        user_prompt_tokens = estimate_tokens(user_prompt)
+        logger.debug(
+            f"[CONVERSATION_DEBUG] User prompt length: {len(user_prompt)} chars (~{user_prompt_tokens:,} tokens)"
+        )
         logger.debug(f"[CONVERSATION_DEBUG] User files: {user_files}")
         success = add_turn(continuation_id, "user", user_prompt, files=user_files)
         if not success:
@@ -728,7 +796,9 @@ async def reconstruct_thread_context(arguments: dict[str, Any]) -> dict[str, Any
     logger.debug(f"[CONVERSATION_DEBUG] Using model: {model_context.model_name}")
     conversation_history, conversation_tokens = build_conversation_history(context, model_context)
     logger.debug(f"[CONVERSATION_DEBUG] Conversation history built: {conversation_tokens:,} tokens")
-    logger.debug(f"[CONVERSATION_DEBUG] Conversation history length: {len(conversation_history)} chars")
+    logger.debug(
+        f"[CONVERSATION_DEBUG] Conversation history length: {len(conversation_history)} chars (~{conversation_tokens:,} tokens)"
+    )
 
     # Add dynamic follow-up instructions based on turn count
     follow_up_instructions = get_follow_up_instructions(len(context.turns))
@@ -737,7 +807,10 @@ async def reconstruct_thread_context(arguments: dict[str, Any]) -> dict[str, Any
     # All tools now use standardized 'prompt' field
     original_prompt = arguments.get("prompt", "")
     logger.debug("[CONVERSATION_DEBUG] Extracting user input from 'prompt' field")
-    logger.debug(f"[CONVERSATION_DEBUG] User input length: {len(original_prompt)} chars")
+    original_prompt_tokens = estimate_tokens(original_prompt) if original_prompt else 0
+    logger.debug(
+        f"[CONVERSATION_DEBUG] User input length: {len(original_prompt)} chars (~{original_prompt_tokens:,} tokens)"
+    )
 
     # Merge original context with new prompt and follow-up instructions
     if conversation_history:

@@ -101,6 +101,23 @@ TEMPERATURE_CREATIVE = 0.7  # For architecture, deep thinking
 # Higher modes use more computational budget but provide deeper analysis
 DEFAULT_THINKING_MODE_THINKDEEP = os.getenv("DEFAULT_THINKING_MODE_THINKDEEP", "high")
 
+# Consensus Tool Defaults
+# Consensus timeout and rate limiting settings
+DEFAULT_CONSENSUS_TIMEOUT = 120.0  # 2 minutes per model
+DEFAULT_CONSENSUS_MAX_INSTANCES_PER_COMBINATION = 2
+
+# Provider concurrency limits for consensus tool
+CONSENSUS_PROVIDER_CONCURRENCY = {
+    "openai": 2,  # Limit OpenAI to 2 concurrent calls
+    "google": 5,  # Gemini can handle more concurrent calls
+    "groq": 10,  # Groq is generally faster
+    "xai": 3,  # Conservative limit for X.AI
+    "anthropic": 3,  # Conservative for Anthropic
+    "ollama": 2,  # Local models - be conservative
+    "openrouter": 5,  # OpenRouter proxy
+}
+DEFAULT_CONSENSUS_CONCURRENCY = 5  # Fallback for unknown providers
+
 # MCP Protocol Transport Limits
 #
 # IMPORTANT: This limit ONLY applies to the Claude CLI ↔ MCP Server transport boundary.

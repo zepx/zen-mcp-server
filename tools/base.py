@@ -740,85 +740,92 @@ class BaseTool(ABC):
 
             if not model_context:
                 # Manual calculation as fallback
-                from config import DEFAULT_MODEL
-
-                model_name = getattr(self, "_current_model_name", None) or DEFAULT_MODEL
-
-                # Handle auto mode gracefully
-                if model_name.lower() == "auto":
-                    from providers.registry import ModelProviderRegistry
-
-                    # Use tool-specific fallback model for capacity estimation
-                    # This properly handles different providers (OpenAI=200K, Gemini=1M)
-                    tool_category = self.get_model_category()
-                    fallback_model = ModelProviderRegistry.get_preferred_fallback_model(tool_category)
-                    logger.debug(
-                        f"[FILES] {self.name}: Auto mode detected, using {fallback_model} "
-                        f"for {tool_category.value} tool capacity estimation"
-                    )
-
-                    try:
-                        provider = self.get_model_provider(fallback_model)
-                        capabilities = provider.get_capabilities(fallback_model)
-
-                        # Calculate content allocation based on model capacity
-                        if capabilities.context_window < 300_000:
-                            # Smaller context models: 60% content, 40% response
-                            model_content_tokens = int(capabilities.context_window * 0.6)
-                        else:
-                            # Larger context models: 80% content, 20% response
-                            model_content_tokens = int(capabilities.context_window * 0.8)
-
-                        effective_max_tokens = model_content_tokens - reserve_tokens
-                        logger.debug(
-                            f"[FILES] {self.name}: Using {fallback_model} capacity for auto mode: "
-                            f"{model_content_tokens:,} content tokens from {capabilities.context_window:,} total"
-                        )
-                    except (ValueError, AttributeError) as e:
-                        # Handle specific errors: provider not found, model not supported, missing attributes
-                        logger.warning(
-                            f"[FILES] {self.name}: Could not get capabilities for fallback model {fallback_model}: {type(e).__name__}: {e}"
-                        )
-                        # Fall back to conservative default for safety
-                        effective_max_tokens = 100_000 - reserve_tokens
-                    except Exception as e:
-                        # Catch any other unexpected errors
-                        logger.error(
-                            f"[FILES] {self.name}: Unexpected error getting model capabilities: {type(e).__name__}: {e}"
-                        )
-                        effective_max_tokens = 100_000 - reserve_tokens
+                # Try to use the stored model context first
+                if hasattr(self, "_model_context") and self._model_context:
+                    model_context = self._model_context
+                    effective_max_tokens = model_context.calculate_token_allocation().content_tokens - reserve_tokens
+                    logger.debug(f"[FILES] {self.name}: Using stored model context for {model_context.model_name}")
                 else:
-                    # Normal mode - use the specified model
-                    try:
-                        provider = self.get_model_provider(model_name)
-                        capabilities = provider.get_capabilities(model_name)
+                    # Ultimate fallback for edge cases
+                    from config import DEFAULT_MODEL
 
-                        # Calculate content allocation based on model capacity
-                        if capabilities.context_window < 300_000:
-                            # Smaller context models: 60% content, 40% response
-                            model_content_tokens = int(capabilities.context_window * 0.6)
-                        else:
-                            # Larger context models: 80% content, 20% response
-                            model_content_tokens = int(capabilities.context_window * 0.8)
+                    model_name = getattr(self, "_current_model_name", None) or DEFAULT_MODEL
 
-                        effective_max_tokens = model_content_tokens - reserve_tokens
+                    # Handle auto mode gracefully
+                    if model_name.lower() == "auto":
+                        from providers.registry import ModelProviderRegistry
+
+                        # Use tool-specific fallback model for capacity estimation
+                        # This properly handles different providers (OpenAI=200K, Gemini=1M)
+                        tool_category = self.get_model_category()
+                        fallback_model = ModelProviderRegistry.get_preferred_fallback_model(tool_category)
                         logger.debug(
-                            f"[FILES] {self.name}: Using model-specific limit for {model_name}: "
-                            f"{model_content_tokens:,} content tokens from {capabilities.context_window:,} total"
+                            f"[FILES] {self.name}: Auto mode detected, using {fallback_model} "
+                            f"for {tool_category.value} tool capacity estimation"
                         )
-                    except (ValueError, AttributeError) as e:
-                        # Handle specific errors: provider not found, model not supported, missing attributes
-                        logger.warning(
-                            f"[FILES] {self.name}: Could not get model capabilities for {model_name}: {type(e).__name__}: {e}"
-                        )
-                        # Fall back to conservative default for safety
-                        effective_max_tokens = 100_000 - reserve_tokens
-                    except Exception as e:
-                        # Catch any other unexpected errors
-                        logger.error(
-                            f"[FILES] {self.name}: Unexpected error getting model capabilities: {type(e).__name__}: {e}"
-                        )
-                        effective_max_tokens = 100_000 - reserve_tokens
+
+                        try:
+                            provider = self.get_model_provider(fallback_model)
+                            capabilities = provider.get_capabilities(fallback_model)
+
+                            # Calculate content allocation based on model capacity
+                            if capabilities.context_window < 300_000:
+                                # Smaller context models: 60% content, 40% response
+                                model_content_tokens = int(capabilities.context_window * 0.6)
+                            else:
+                                # Larger context models: 80% content, 20% response
+                                model_content_tokens = int(capabilities.context_window * 0.8)
+
+                            effective_max_tokens = model_content_tokens - reserve_tokens
+                            logger.debug(
+                                f"[FILES] {self.name}: Using {fallback_model} capacity for auto mode: "
+                                f"{model_content_tokens:,} content tokens from {capabilities.context_window:,} total"
+                            )
+                        except (ValueError, AttributeError) as e:
+                            # Handle specific errors: provider not found, model not supported, missing attributes
+                            logger.warning(
+                                f"[FILES] {self.name}: Could not get capabilities for fallback model {fallback_model}: {type(e).__name__}: {e}"
+                            )
+                            # Fall back to conservative default for safety
+                            effective_max_tokens = 100_000 - reserve_tokens
+                        except Exception as e:
+                            # Catch any other unexpected errors
+                            logger.error(
+                                f"[FILES] {self.name}: Unexpected error getting model capabilities: {type(e).__name__}: {e}"
+                            )
+                            effective_max_tokens = 100_000 - reserve_tokens
+                    else:
+                        # Normal mode - use the specified model
+                        try:
+                            provider = self.get_model_provider(model_name)
+                            capabilities = provider.get_capabilities(model_name)
+
+                            # Calculate content allocation based on model capacity
+                            if capabilities.context_window < 300_000:
+                                # Smaller context models: 60% content, 40% response
+                                model_content_tokens = int(capabilities.context_window * 0.6)
+                            else:
+                                # Larger context models: 80% content, 20% response
+                                model_content_tokens = int(capabilities.context_window * 0.8)
+
+                            effective_max_tokens = model_content_tokens - reserve_tokens
+                            logger.debug(
+                                f"[FILES] {self.name}: Using model-specific limit for {model_name}: "
+                                f"{model_content_tokens:,} content tokens from {capabilities.context_window:,} total"
+                            )
+                        except (ValueError, AttributeError) as e:
+                            # Handle specific errors: provider not found, model not supported, missing attributes
+                            logger.warning(
+                                f"[FILES] {self.name}: Could not get model capabilities for {model_name}: {type(e).__name__}: {e}"
+                            )
+                            # Fall back to conservative default for safety
+                            effective_max_tokens = 100_000 - reserve_tokens
+                        except Exception as e:
+                            # Catch any other unexpected errors
+                            logger.error(
+                                f"[FILES] {self.name}: Unexpected error getting model capabilities: {type(e).__name__}: {e}"
+                            )
+                            effective_max_tokens = 100_000 - reserve_tokens
 
         # Ensure we have a reasonable minimum budget
         effective_max_tokens = max(1000, effective_max_tokens)
@@ -1214,7 +1221,7 @@ When recommending searches, be specific about what information you need and why 
 
         return estimate_file_tokens(file_path)
 
-    def check_total_file_size(self, files: list[str]) -> Optional[dict[str, Any]]:
+    def check_total_file_size(self, files: list[str], model_name: str) -> Optional[dict[str, Any]]:
         """
         Check if total file sizes would exceed token threshold before embedding.
 
@@ -1224,19 +1231,13 @@ When recommending searches, be specific about what information you need and why 
 
         Args:
             files: List of file paths to check
+            model_name: The resolved model name to use for token limits
 
         Returns:
             Dict with `code_too_large` response if too large, None if acceptable
         """
         if not files:
             return None
-
-        # Get current model name for context-aware thresholds
-        model_name = getattr(self, "_current_model_name", None)
-        if not model_name:
-            from config import DEFAULT_MODEL
-
-            model_name = DEFAULT_MODEL
 
         # Use centralized file size checking with model context
         from utils.file_utils import check_total_file_size as check_file_size_utility
@@ -1353,6 +1354,65 @@ When recommending searches, be specific about what information you need and why 
             # Extract and validate images from request
             images = getattr(request, "images", None) or []
 
+            # MODEL RESOLUTION NOW HAPPENS AT MCP BOUNDARY
+            # Extract pre-resolved model context from server.py
+            model_context = self._current_arguments.get("_model_context")
+            resolved_model_name = self._current_arguments.get("_resolved_model_name")
+
+            if model_context and resolved_model_name:
+                # Model was already resolved at MCP boundary
+                model_name = resolved_model_name
+                logger.debug(f"Using pre-resolved model '{model_name}' from MCP boundary")
+            else:
+                # Fallback for backward compatibility (e.g., tests calling execute directly)
+                model_name = getattr(request, "model", None)
+                if not model_name:
+                    from config import DEFAULT_MODEL
+
+                    model_name = DEFAULT_MODEL
+                logger.debug(f"Using fallback model resolution for '{model_name}' (test mode)")
+
+                # For tests: Check if we should require model selection (auto mode)
+                if self._should_require_model_selection(model_name):
+                    # Get suggested model based on tool category
+                    from providers.registry import ModelProviderRegistry
+
+                    tool_category = self.get_model_category()
+                    suggested_model = ModelProviderRegistry.get_preferred_fallback_model(tool_category)
+
+                    # Build error message based on why selection is required
+                    if model_name.lower() == "auto":
+                        error_message = (
+                            f"Model parameter is required in auto mode. "
+                            f"Suggested model for {self.name}: '{suggested_model}' "
+                            f"(category: {tool_category.value})"
+                        )
+                    else:
+                        # Model was specified but not available
+                        available_models = self._get_available_models()
+
+                        error_message = (
+                            f"Model '{model_name}' is not available with current API keys. "
+                            f"Available models: {', '.join(available_models)}. "
+                            f"Suggested model for {self.name}: '{suggested_model}' "
+                            f"(category: {tool_category.value})"
+                        )
+                    error_output = ToolOutput(
+                        status="error",
+                        content=error_message,
+                        content_type="text",
+                    )
+                    return [TextContent(type="text", text=error_output.model_dump_json())]
+
+                # Create model context for tests
+                from utils.model_context import ModelContext
+
+                model_context = ModelContext(model_name)
+
+            # Store resolved model name for use by helper methods
+            self._current_model_name = model_name
+            self._model_context = model_context
+
             # Check if we have continuation_id - if so, conversation history is already embedded
             continuation_id = getattr(request, "continuation_id", None)
 
@@ -1389,57 +1449,11 @@ When recommending searches, be specific about what information you need and why 
                 prompt = f"{prompt}\n\n{follow_up_instructions}"
                 logger.debug(f"Added follow-up instructions for new {self.name} conversation")
 
-            # Extract model configuration from request or use defaults
-            model_name = getattr(request, "model", None)
-            if not model_name:
-                from config import DEFAULT_MODEL
-
-                model_name = DEFAULT_MODEL
-
-            # Check if we need Claude to select a model
-            # This happens when:
-            # 1. The model is explicitly "auto"
-            # 2. The requested model is not available
-            if self._should_require_model_selection(model_name):
-                # Get suggested model based on tool category
-                from providers.registry import ModelProviderRegistry
-
-                tool_category = self.get_model_category()
-                suggested_model = ModelProviderRegistry.get_preferred_fallback_model(tool_category)
-
-                # Build error message based on why selection is required
-                if model_name.lower() == "auto":
-                    error_message = (
-                        f"Model parameter is required in auto mode. "
-                        f"Suggested model for {self.name}: '{suggested_model}' "
-                        f"(category: {tool_category.value})"
-                    )
-                else:
-                    # Model was specified but not available
-                    # Get list of available models
-                    available_models = self._get_available_models()
-
-                    error_message = (
-                        f"Model '{model_name}' is not available with current API keys. "
-                        f"Available models: {', '.join(available_models)}. "
-                        f"Suggested model for {self.name}: '{suggested_model}' "
-                        f"(category: {tool_category.value})"
-                    )
-
-                error_output = ToolOutput(
-                    status="error",
-                    content=error_message,
-                    content_type="text",
-                )
-                return [TextContent(type="text", text=error_output.model_dump_json())]
-
-            # Store model name for use by helper methods like _prepare_file_content_for_prompt
-            # Only set this after auto mode validation to prevent "auto" being used as a model name
-            self._current_model_name = model_name
+            # Model name already resolved and stored in self._current_model_name earlier
 
             # Validate images at MCP boundary if any were provided
             if images:
-                image_validation_error = self._validate_image_limits(images, model_name, continuation_id)
+                image_validation_error = self._validate_image_limits(images, self._current_model_name, continuation_id)
                 if image_validation_error:
                     return [TextContent(type="text", text=json.dumps(image_validation_error))]
 
@@ -1451,10 +1465,10 @@ When recommending searches, be specific about what information you need and why 
                 thinking_mode = self.get_default_thinking_mode()
 
             # Get the appropriate model provider
-            provider = self.get_model_provider(model_name)
+            provider = self.get_model_provider(self._current_model_name)
 
             # Validate and correct temperature for this model
-            temperature, temp_warnings = self._validate_and_correct_temperature(model_name, temperature)
+            temperature, temp_warnings = self._validate_and_correct_temperature(self._current_model_name, temperature)
 
             # Log any temperature corrections
             for warning in temp_warnings:
@@ -1465,16 +1479,21 @@ When recommending searches, be specific about what information you need and why 
 
             # Generate AI response using the provider
             logger.info(f"Sending request to {provider.get_provider_type().value} API for {self.name}")
-            logger.info(f"Using model: {model_name} via {provider.get_provider_type().value} provider")
-            logger.debug(f"Prompt length: {len(prompt)} characters")
+            logger.info(f"Using model: {self._current_model_name} via {provider.get_provider_type().value} provider")
+
+            # Import token estimation utility
+            from utils.token_utils import estimate_tokens
+
+            estimated_tokens = estimate_tokens(prompt)
+            logger.debug(f"Prompt length: {len(prompt)} characters (~{estimated_tokens:,} tokens)")
 
             # Generate content with provider abstraction
             model_response = provider.generate_content(
                 prompt=prompt,
-                model_name=model_name,
+                model_name=self._current_model_name,
                 system_prompt=system_prompt,
                 temperature=temperature,
-                thinking_mode=thinking_mode if provider.supports_thinking_mode(model_name) else None,
+                thinking_mode=thinking_mode if provider.supports_thinking_mode(self._current_model_name) else None,
                 images=images if images else None,  # Pass images via kwargs
             )
 
@@ -1486,7 +1505,11 @@ When recommending searches, be specific about what information you need and why 
 
                 # Parse response to check for clarification requests or format output
                 # Pass model info for conversation tracking
-                model_info = {"provider": provider, "model_name": model_name, "model_response": model_response}
+                model_info = {
+                    "provider": provider,
+                    "model_name": self._current_model_name,
+                    "model_response": model_response,
+                }
                 tool_output = self._parse_response(raw_text, request, model_info)
                 logger.info(f"✅ {self.name} tool completed successfully")
 

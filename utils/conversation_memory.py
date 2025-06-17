@@ -946,6 +946,45 @@ def build_conversation_history(context: ThreadContext, model_context=None, read_
             turn_parts.append(f"Files used in this turn: {', '.join(turn.files)}")
             turn_parts.append("")  # Empty line for readability
 
+        # Check if this is a consensus turn and handle special formatting
+        if turn.tool_name == "consensus" and turn.model_metadata and turn.model_metadata.get("individual_responses"):
+            # Special formatting for consensus turns
+            individual_responses = turn.model_metadata["individual_responses"]
+
+            # Add consensus header
+            models_consulted = []
+            for resp in individual_responses:
+                model = resp["model"]
+                stance = resp.get("stance", "neutral")
+                if stance != "neutral":
+                    models_consulted.append(f"{model}:{stance}")
+                else:
+                    models_consulted.append(model)
+
+            turn_parts.append(f"Models consulted: {', '.join(models_consulted)}")
+            turn_parts.append("")
+            turn_parts.append("=== INDIVIDUAL MODEL RESPONSES ===")
+            turn_parts.append("")
+
+            # Add each successful model response
+            for i, response in enumerate(individual_responses):
+                model_name = response["model"]
+                stance = response.get("stance", "neutral")
+                verdict = response["verdict"]
+
+                stance_label = f"({stance.title()} Stance)" if stance != "neutral" else "(Neutral Analysis)"
+                turn_parts.append(f"**{model_name.upper()} {stance_label}**:")
+                turn_parts.append(verdict)
+
+                if i < len(individual_responses) - 1:  # Add separator between responses
+                    turn_parts.append("")
+                    turn_parts.append("---")
+                turn_parts.append("")
+
+            turn_parts.append("=== END INDIVIDUAL RESPONSES ===")
+            turn_parts.append("")
+            turn_parts.append("Claude's Synthesis:")
+
         # Add the actual content
         turn_parts.append(turn.content)
 
