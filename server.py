@@ -25,7 +25,7 @@ import sys
 import time
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
-from typing import Any
+from typing import Any, Optional
 
 from mcp.server import Server
 from mcp.server.models import InitializationOptions
@@ -524,6 +524,7 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
 
         # EARLY MODEL RESOLUTION AT MCP BOUNDARY
         # Resolve model before passing to tool - this ensures consistent model handling
+        # NOTE: Consensus tool is exempt as it handles multiple models internally
         from providers.registry import ModelProviderRegistry
         from utils.file_utils import check_total_file_size
         from utils.model_context import ModelContext
@@ -531,6 +532,35 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
         # Get model from arguments or use default
         model_name = arguments.get("model") or DEFAULT_MODEL
         logger.debug(f"Initial model for {name}: {model_name}")
+
+        # Parse model:option format if present
+        model_name, model_option = parse_model_option(model_name)
+        if model_option:
+            logger.debug(f"Parsed model format - model: '{model_name}', option: '{model_option}'")
+
+        # Special handling for consensus tool which handles multiple models
+        if name == "consensus" and "models" in arguments:
+            # Parse each model in the models list for consensus
+            parsed_models = []
+            for model_entry in arguments.get("models", []):
+                parsed_model_name, parsed_option = parse_model_option(model_entry)
+                parsed_models.append({"model": parsed_model_name, "option": parsed_option})
+
+            # Store parsed models information for consensus tool
+            arguments["_parsed_models"] = parsed_models
+            logger.debug(f"Consensus tool: parsed {len(parsed_models)} models with options")
+
+            # Skip the standard model resolution for consensus
+            result = await tool.execute(arguments)
+            logger.info(f"Tool '{name}' execution completed")
+
+            # Log completion to activity file
+            try:
+                mcp_activity_logger = logging.getLogger("mcp_activity")
+                mcp_activity_logger.info(f"TOOL_COMPLETED: {name}")
+            except Exception:
+                pass
+            return result
 
         # Handle auto mode at MCP boundary - resolve to specific model
         if model_name.lower() == "auto":
@@ -564,13 +594,15 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
             )
             return [TextContent(type="text", text=error_output.model_dump_json())]
 
-        # Create model context with resolved model
-        model_context = ModelContext(model_name)
+        # Create model context with resolved model and option
+        model_context = ModelContext(model_name, model_option)
         arguments["_model_context"] = model_context
         arguments["_resolved_model_name"] = model_name  # For backward compatibility during transition
         logger.debug(
             f"Model context created for {model_name} with {model_context.capabilities.context_window} token capacity"
         )
+        if model_option:
+            logger.debug(f"Model option stored in context: '{model_option}'")
 
         # EARLY FILE SIZE VALIDATION AT MCP BOUNDARY
         # Check file sizes before tool execution using resolved model
@@ -603,6 +635,24 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
     # Handle unknown tool requests gracefully
     else:
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
+
+
+def parse_model_option(model_string: str) -> tuple[str, Optional[str]]:
+    """
+    Parse model:option format into model name and option.
+
+    Args:
+        model_string: String that may contain "model:option" format
+
+    Returns:
+        tuple: (model_name, option) where option may be None
+    """
+    if ":" in model_string and not model_string.startswith("http"):  # Avoid parsing URLs
+        parts = model_string.split(":", 1)
+        model_name = parts[0].strip()
+        model_option = parts[1].strip() if len(parts) > 1 else None
+        return model_name, model_option
+    return model_string.strip(), None
 
 
 def get_follow_up_instructions(current_turn_count: int, max_turns: int = None) -> str:

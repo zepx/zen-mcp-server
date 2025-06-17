@@ -39,9 +39,10 @@ class ConsensusRequest(ToolRequest):
     models: list[str] = Field(
         ...,
         description=(
-            "List of models to consult for consensus. Supports stance specification using 'model:stance' format. "
-            "Stances: ':for' (supportive perspective), ':against' (critical perspective), or no stance (neutral). "
-            "Examples: ['o3:for', 'pro:against', 'grok-3'] creates a debate format. "
+            "List of models to consult for consensus. Format: 'model' for neutral or 'model:stance' for positioned analysis. "
+            "ONLY these stance words are supported - Supportive: 'for', 'support', 'favor'. Critical: 'against', 'oppose', 'critical'. "
+            "Examples: 'o3:for', 'pro:support', 'grok:favor' (supportive); 'o3:against', 'pro:oppose', 'grok:critical' (critical); "
+            "'o3', 'pro', 'grok-3' (neutral). Default to neutral unless user requests debate format or you've asked and they agreed. "
             "Maximum 2 instances per model+stance combination."
         ),
     )
@@ -87,9 +88,12 @@ class ConsensusTool(BaseTool):
         return (
             "MULTI-MODEL CONSENSUS - Gather diverse perspectives from multiple AI models on technical proposals, "
             "plans, and ideas. Perfect for validation, feasibility assessment, and getting comprehensive "
-            "viewpoints on complex decisions. Supports stance steering (:for/:against) to create structured "
-            "debates and balanced analysis. Use this when you need expert validation from multiple models "
-            "with different perspectives."
+            "viewpoints on complex decisions. Supports optional stance steering to create structured debates. "
+            "Only apply stances when the user explicitly requests opposing views OR when you determine that "
+            "contrasting perspectives would add significant value to the analysis. In such cases, consider "
+            "asking the user: 'Would you like me to have one model argue strongly in favor and another "
+            "against, to better explore the tradeoffs?' Use neutral stances by default unless there's clear "
+            "benefit to debate format."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -107,9 +111,10 @@ class ConsensusTool(BaseTool):
                     "type": "array",
                     "items": {"type": "string"},
                     "description": (
-                        "List of models to consult for consensus. Supports stance specification using 'model:stance' format. "
-                        "Stances: ':for' (supportive perspective), ':against' (critical perspective), or no stance (neutral). "
-                        "Examples: ['o3:for', 'pro:against', 'grok-3'] creates a debate format. "
+                        "List of models to consult for consensus. Format: 'model' for neutral or 'model:stance' for positioned analysis. "
+                        "ONLY these stance words are supported - Supportive: 'for', 'support', 'favor'. Critical: 'against', 'oppose', 'critical'. "
+                        "Examples: 'o3:for', 'pro:support', 'grok:favor' (supportive); 'o3:against', 'pro:oppose', 'grok:critical' (critical); "
+                        "'o3', 'pro', 'grok-3' (neutral). Default to neutral unless user requests debate format or you've asked and they agreed. "
                         "Maximum 2 instances per model+stance combination."
                     ),
                 },
@@ -246,31 +251,40 @@ class ConsensusTool(BaseTool):
 
     def _parse_model_and_stance(self, model_entry: str) -> tuple[str, str]:
         """Parse model entry like 'o3:against' into model and stance."""
-        if ":" in model_entry:
-            model_name, stance = model_entry.split(":", 1)
-            model_name = model_name.strip()
-            stance = stance.strip()
+        # Import the generic parser from server
+        from server import parse_model_option
 
-            # Check for empty model name
-            if not model_name:
-                return None, "model name cannot be empty"
+        # Define stance synonyms
+        supportive_stances = {"for", "support", "favor"}
+        critical_stances = {"against", "oppose", "critical"}
 
-            # Handle empty stance (treat as neutral)
-            if not stance:
-                stance = "neutral"
+        # Use the generic parser
+        model_name, stance = parse_model_option(model_entry)
 
-            # Validate stance - only allow for/against/neutral
-            if stance not in {"for", "against", "neutral"}:
-                return None, f"invalid stance '{stance}' (must be 'for', 'against', or omitted for neutral)"
-
-            return model_name, stance
-
-        # No colon - just model name
-        model_name = model_entry.strip()
         if not model_name:
             return None, "model name cannot be empty"
 
-        return model_name, "neutral"  # Default stance
+        # If no stance provided, default to neutral
+        if not stance:
+            return model_name, "neutral"
+
+        # Normalize stance to lowercase
+        stance = stance.lower()
+
+        # Map synonyms to canonical stance
+        if stance in supportive_stances:
+            stance = "for"
+        elif stance in critical_stances:
+            stance = "against"
+        elif stance == "neutral":
+            pass  # Already neutral
+        else:
+            return (
+                None,
+                f"invalid stance '{stance}' (must be one of: {', '.join(sorted(supportive_stances | critical_stances))}, or omitted for neutral)",
+            )
+
+        return model_name, stance
 
     def _validate_model_combinations(self, model_entries: list[str]) -> tuple[list[tuple[str, str]], list[str]]:
         """Validate model+stance combinations and enforce limits.
@@ -312,23 +326,70 @@ class ConsensusTool(BaseTool):
         base_prompt = self.get_system_prompt()
 
         stance_prompts = {
-            "for": """Your perspective is SUPPORTIVE of the proposal. Focus on:
-- Why this idea could work well
-- Potential benefits and positive outcomes
-- Creative solutions to overcome challenges
-- Ways to maximize success and value
-- Building upon the strengths of the approach
+            "for": """SUPPORTIVE PERSPECTIVE WITH INTEGRITY
 
-Be constructive and solution-oriented while still being realistic about challenges.""",
-            "against": """Your perspective is CRITICAL of the proposal. Focus on:
-- Potential problems and failure modes
-- Risks, downsides, and negative consequences
-- Why this approach might not work
-- Missing considerations and overlooked issues
-- Alternative approaches that might be better
+You are tasked with advocating FOR this proposal, but with CRITICAL GUARDRAILS:
 
-Be skeptical and thorough in identifying issues while remaining constructive.""",
-            "neutral": "No stance specified - provide balanced analysis considering both positive and negative aspects equally.",
+MANDATORY ETHICAL CONSTRAINTS:
+- This is NOT a debate for entertainment. You MUST act in good faith and in the best interest of the questioner
+- You MUST think deeply about whether supporting this idea is safe, sound, and passes essential requirements
+- You MUST be direct and unequivocal in saying "this is a bad idea" when it truly is
+- There must be at least ONE COMPELLING reason to be optimistic, otherwise DO NOT support it
+
+WHEN TO REFUSE SUPPORT (MUST OVERRIDE STANCE):
+- If the idea is fundamentally harmful to users, project, or stakeholders
+- If implementation would violate security, privacy, or ethical standards
+- If the proposal is technically infeasible within realistic constraints
+- If costs/risks dramatically outweigh any potential benefits
+
+YOUR SUPPORTIVE ANALYSIS SHOULD:
+- Identify genuine strengths and opportunities
+- Propose solutions to overcome legitimate challenges
+- Highlight synergies with existing systems
+- Suggest optimizations that enhance value
+- Present realistic implementation pathways
+
+Remember: Being "for" means finding the BEST possible version of the idea IF it has merit, not blindly supporting bad ideas.""",
+            "against": """CRITICAL PERSPECTIVE WITH RESPONSIBILITY
+
+You are tasked with critiquing this proposal, but with ESSENTIAL BOUNDARIES:
+
+MANDATORY FAIRNESS CONSTRAINTS:
+- You MUST NOT oppose genuinely excellent, common-sense ideas just to be contrarian
+- You MUST acknowledge when a proposal is fundamentally sound and well-conceived
+- You CANNOT give harmful advice or recommend against beneficial changes
+- If the idea is outstanding, say so clearly while offering constructive refinements
+
+WHEN TO MODERATE CRITICISM (MUST OVERRIDE STANCE):
+- If the proposal addresses critical user needs effectively
+- If it follows established best practices with good reason
+- If benefits clearly and substantially outweigh risks
+- If it's the obvious right solution to the problem
+
+YOUR CRITICAL ANALYSIS SHOULD:
+- Identify legitimate risks and failure modes
+- Point out overlooked complexities
+- Suggest more efficient alternatives
+- Highlight potential negative consequences
+- Question assumptions that may be flawed
+
+Remember: Being "against" means rigorous scrutiny to ensure quality, not undermining good ideas that deserve support.""",
+            "neutral": """BALANCED PERSPECTIVE
+
+Provide objective analysis considering both positive and negative aspects. However, if there is overwhelming evidence
+that the proposal clearly leans toward being exceptionally good or particularly problematic, you MUST accurately
+reflect this reality. Being "balanced" means being truthful about the weight of evidence, not artificially creating
+50/50 splits when the reality is 90/10.
+
+Your analysis should:
+- Present all significant pros and cons discovered
+- Weight them according to actual impact and likelihood
+- If evidence strongly favors one conclusion, clearly state this
+- Provide proportional coverage based on the strength of arguments
+- Help the questioner see the true balance of considerations
+
+Remember: Artificial balance that misrepresents reality is not helpful. True balance means accurate representation
+of the evidence, even when it strongly points in one direction.""",
         }
 
         stance_prompt = stance_prompts.get(stance, stance_prompts["neutral"])
@@ -540,6 +601,22 @@ Be skeptical and thorough in identifying issues while remaining constructive."""
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         """Execute consensus gathering from multiple models."""
+
+        # Check if we have pre-parsed models from server.py
+        if "_parsed_models" in arguments:
+            # Reconstruct the models list with stance format for validation
+            reconstructed_models = []
+            for pm in arguments["_parsed_models"]:
+                model = pm["model"]
+                option = pm["option"]
+                if option:
+                    reconstructed_models.append(f"{model}:{option}")
+                else:
+                    reconstructed_models.append(model)
+
+            # Update arguments with reconstructed models
+            arguments["models"] = reconstructed_models
+            logger.debug(f"Using pre-parsed models from server: {reconstructed_models}")
 
         # Validate and create request
         request = ConsensusRequest(**arguments)
