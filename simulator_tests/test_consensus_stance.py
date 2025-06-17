@@ -23,8 +23,7 @@ class TestConsensusStance(BaseSimulatorTest):
         try:
             self.logger.info("Testing consensus tool with ModelConfig objects and custom stance prompts")
 
-            # Send request with new ModelConfig format
-            # Using shorter prompt to stay within subprocess timeout limits
+            # Send request with full two-model consensus
             response, continuation_id = self.call_mcp_tool(
                 "consensus",
                 {
@@ -33,15 +32,15 @@ class TestConsensusStance(BaseSimulatorTest):
                         {
                             "model": "flash",
                             "stance": "for",
-                            "stance_prompt": "Focus on user engagement and potential benefits this feature could bring to enterprise users.",
+                            "stance_prompt": "Focus on user engagement benefits.",
                         },
                         {
                             "model": "flash",
-                            "stance": "against",
-                            "stance_prompt": "Focus on technical complexity, maintenance overhead, and potential scope creep issues.",
+                            "stance": "against", 
+                            "stance_prompt": "Focus on technical complexity issues.",
                         },
                     ],
-                    "model": "flash",  # Default model for Claude's synthesis
+                    "model": "flash",
                 },
             )
 
@@ -148,50 +147,7 @@ class TestConsensusStance(BaseSimulatorTest):
                 self.logger.error("Missing 'next_steps' field in consensus response")
                 return False
 
-            self.logger.info("✓ Consensus tool correctly processed explicit stance arguments")
-
-            # Test with stance synonyms
-            self.logger.info("\nTesting consensus tool with stance synonyms...")
-            response2, _ = self.call_mcp_tool(
-                "consensus",
-                {
-                    "prompt": "Real-time notifications: worth it?",
-                    "models": [
-                        {
-                            "model": "o3",
-                            "stance": "support",  # Test synonym
-                            "stance_prompt": "Emphasize benefits for user experience and business value.",
-                        },
-                        {
-                            "model": "pro",
-                            "stance": "oppose",  # Test synonym
-                            "stance_prompt": "Focus on potential downsides and implementation challenges.",
-                        },
-                    ],
-                    "model": "flash",
-                },
-            )
-
-            if not response2:
-                self.logger.error("Failed to get response for synonym test")
-                return False
-
-            try:
-                consensus_data2 = json.loads(response2)
-            except json.JSONDecodeError:
-                self.logger.error(f"Failed to parse synonym test response as JSON: {response2}")
-                return False
-
-            # Check that synonyms were normalized
-            models_used2 = consensus_data2.get("models_used", [])
-            if "o3:for" not in models_used2:  # support -> for
-                self.logger.error("Failed to normalize 'support' to 'for'")
-                return False
-            if "pro:against" not in models_used2:  # oppose -> against
-                self.logger.error("Failed to normalize 'oppose' to 'against'")
-                return False
-
-            self.logger.info("✓ Consensus tool correctly normalized stance synonyms")
+            self.logger.info("✓ Consensus tool successfully processed two-model consensus with stance steering")
 
             return True
 

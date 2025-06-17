@@ -2,7 +2,6 @@
 Consensus tool for multi-model perspective gathering and validation
 """
 
-import asyncio
 import json
 import logging
 from typing import TYPE_CHECKING, Any, Optional
@@ -440,12 +439,11 @@ of the evidence, even when it strongly points in one direction.""",
     def _get_single_response(
         self, provider, model_config: ModelConfig, prompt: str, request: ConsensusRequest
     ) -> dict[str, Any]:
-        """Get response from a single model with MCP-safe synchronous processing."""
+        """Get response from a single model - synchronous method."""
         logger.debug(f"Getting response from {model_config.model} with stance '{model_config.stance}'")
 
         try:
-            # Direct synchronous call, no async complexity or threading
-            # Rate limiting removed for simplicity - sequential processing provides natural rate limiting
+            # Provider.generate_content is synchronous, not async
             response = provider.generate_content(
                 prompt=prompt,
                 model_name=model_config.model,
@@ -469,84 +467,34 @@ of the evidence, even when it strongly points in one direction.""",
             logger.error(f"Error getting response from {model_config.model}:{model_config.stance}: {str(e)}")
             return {"model": model_config.model, "stance": model_config.stance, "status": "error", "error": str(e)}
 
-    async def _get_consensus_responses(
+    def _get_consensus_responses(
         self, provider_configs: list[tuple], prompt: str, request: ConsensusRequest
     ) -> list[dict[str, Any]]:
-        """Execute all model requests with beautifully simple MCP-compatible processing."""
+        """Execute all model requests sequentially - purely synchronous like other tools."""
 
-        # For 2 models, try simple concurrent execution
-        # For more models, use sequential to be conservative
-        if len(provider_configs) <= 2:
-            logger.debug(f"Using concurrent processing for {len(provider_configs)} models")
-            return await self._get_responses_concurrent(provider_configs, prompt, request)
-        else:
-            logger.debug(f"Using sequential processing for {len(provider_configs)} models")
-            return await self._get_responses_sequential(provider_configs, prompt, request)
+        logger.debug(f"Processing {len(provider_configs)} models sequentially")
+        responses = []
 
-    async def _get_responses_concurrent(
-        self, provider_configs: list[tuple], prompt: str, request: ConsensusRequest
-    ) -> list[dict[str, Any]]:
-        """Simple concurrent execution for small numbers of models."""
-
-        async def get_single_async(provider, model_config):
+        for i, (provider, model_config) in enumerate(provider_configs):
             try:
-                # Wrap synchronous call in thread to avoid blocking
-                loop = asyncio.get_event_loop()
-                response = await loop.run_in_executor(
-                    None,  # Use default thread pool (simple and clean)
-                    self._get_single_response,
-                    provider,
-                    model_config,
-                    prompt,
-                    request,
-                )
-                return response
+                logger.debug(f"Processing {model_config.model}:{model_config.stance} sequentially ({i+1}/{len(provider_configs)})")
+
+                # Direct synchronous call - matches pattern of other tools
+                response = self._get_single_response(provider, model_config, prompt, request)
+                responses.append(response)
+
             except Exception as e:
                 logger.error(f"Failed to get response from {model_config.model}:{model_config.stance}: {str(e)}")
-                return {
+                responses.append({
                     "model": model_config.model,
                     "stance": model_config.stance,
                     "status": "error",
                     "error": f"Unhandled exception: {str(e)}",
-                }
+                })
 
-        # Execute all models concurrently using asyncio.gather
-        tasks = [get_single_async(provider, model_config) for provider, model_config in provider_configs]
-        responses = await asyncio.gather(*tasks, return_exceptions=False)
-
-        logger.debug(f"Concurrent processing completed for {len(responses)} models")
+        logger.debug(f"Sequential processing completed for {len(responses)} models")
         return responses
 
-    async def _get_responses_sequential(
-        self, provider_configs: list[tuple], prompt: str, request: ConsensusRequest
-    ) -> list[dict[str, Any]]:
-        """Sequential processing for larger numbers of models."""
-
-        responses = []
-
-        for provider, model_config in provider_configs:
-            try:
-                logger.debug(f"Processing {model_config.model}:{model_config.stance} sequentially")
-
-                # Direct synchronous call - simple and MCP-safe
-                response = self._get_single_response(provider, model_config, prompt, request)
-                responses.append(response)
-
-                # Brief yield to allow MCP to process any pending messages
-                await asyncio.sleep(0.1)
-
-            except Exception as e:
-                logger.error(f"Failed to get response from {model_config.model}:{model_config.stance}: {str(e)}")
-                responses.append(
-                    {
-                        "model": model_config.model,
-                        "stance": model_config.stance,
-                        "status": "error",
-                        "error": f"Unhandled exception: {str(e)}",
-                    }
-                )
-
-        return responses
 
     def _format_consensus_output(self, responses: list[dict[str, Any]], skipped_entries: list[str]) -> str:
         """Format the consensus responses into structured output for Claude."""
@@ -760,9 +708,9 @@ of the evidence, even when it strongly points in one direction.""",
             }
             return [TextContent(type="text", text=json.dumps(error_output, indent=2))]
 
-        # Send to all models sequentially (MCP-safe)
+        # Send to all models sequentially (purely synchronous like other tools)
         logger.debug(f"Sending consensus request to {len(provider_configs)} models")
-        responses = await self._get_consensus_responses(provider_configs, consensus_prompt, request)
+        responses = self._get_consensus_responses(provider_configs, consensus_prompt, request)
         logger.debug(f"Received {len(responses)} responses from consensus models")
 
         # Enforce minimum success requirement - must have at least 1 successful response
@@ -781,8 +729,7 @@ of the evidence, even when it strongly points in one direction.""",
             }
             return [TextContent(type="text", text=json.dumps(error_output, indent=2))]
 
-        # Yield before formatting to give MCP breathing room
-        await asyncio.sleep(0.1)
+        logger.debug("About to format consensus output for MCP response")
 
         # Structure the output and store in conversation memory
         consensus_output = self._format_consensus_output(responses, skipped_entries)
@@ -793,7 +740,7 @@ of the evidence, even when it strongly points in one direction.""",
 
         # Store in conversation memory if continuation_id is provided
         if request.continuation_id:
-            await self.store_conversation_turn(
+            self.store_conversation_turn(
                 request.continuation_id,
                 consensus_output,
                 request.files,
@@ -804,7 +751,7 @@ of the evidence, even when it strongly points in one direction.""",
 
         return [TextContent(type="text", text=consensus_output)]
 
-    async def store_conversation_turn(
+    def store_conversation_turn(
         self,
         continuation_id: str,
         output: str,
@@ -829,8 +776,8 @@ of the evidence, even when it strongly points in one direction.""",
             "individual_responses": successful_responses,  # Only store successful responses
         }
 
-        # Store the turn with special consensus metadata
-        await add_turn(
+        # Store the turn with special consensus metadata - add_turn is synchronous
+        add_turn(
             thread_id=continuation_id,
             role="assistant",
             content=output,
