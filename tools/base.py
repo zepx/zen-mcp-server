@@ -31,6 +31,7 @@ from providers.base import ProviderType
 from utils import check_token_limit
 from utils.conversation_memory import (
     MAX_CONVERSATION_TURNS,
+    ConversationTurn,
     add_turn,
     create_thread,
     get_conversation_file_list,
@@ -643,6 +644,41 @@ class BaseTool(ABC):
             )
             return requested_files
 
+    def format_conversation_turn(self, turn: ConversationTurn) -> list[str]:
+        """
+        Format a conversation turn for display in conversation history.
+
+        Tools can override this to provide custom formatting for their responses
+        while maintaining the standard structure for cross-tool compatibility.
+
+        This method is called by build_conversation_history when reconstructing
+        conversation context, allowing each tool to control how its responses
+        appear in subsequent conversation turns.
+
+        Args:
+            turn: The conversation turn to format (from utils.conversation_memory)
+
+        Returns:
+            list[str]: Lines of formatted content for this turn
+
+        Example:
+            Default implementation returns:
+            ["Files used in this turn: file1.py, file2.py", "", "Response content..."]
+
+            Tools can override to add custom sections, formatting, or metadata display.
+        """
+        parts = []
+
+        # Add files context if present
+        if turn.files:
+            parts.append(f"Files used in this turn: {', '.join(turn.files)}")
+            parts.append("")  # Empty line for readability
+
+        # Add the actual content
+        parts.append(turn.content)
+
+        return parts
+
     def _prepare_file_content_for_prompt(
         self,
         request_files: list[str],
@@ -716,116 +752,35 @@ class BaseTool(ABC):
         elif max_tokens is not None:
             effective_max_tokens = max_tokens - reserve_tokens
         else:
-            # Get model-specific limits
-            # First check if model_context was passed from server.py
-            model_context = None
-            if arguments:
-                model_context = arguments.get("_model_context") or getattr(self, "_current_arguments", {}).get(
-                    "_model_context"
+            # The execute() method is responsible for setting self._model_context.
+            # A missing context is a programming error, not a fallback case.
+            if not hasattr(self, "_model_context") or not self._model_context:
+                logger.error(
+                    f"[FILES] {self.name}: _prepare_file_content_for_prompt called without a valid model context. "
+                    "This indicates an incorrect call sequence in the tool's implementation."
                 )
+                # Fail fast to reveal integration issues. A silent fallback with arbitrary
+                # limits can hide bugs and lead to unexpected token usage or silent failures.
+                raise RuntimeError("ModelContext not initialized before file preparation.")
 
-            if model_context:
-                # Use the passed model context
-                try:
-                    token_allocation = model_context.calculate_token_allocation()
-                    effective_max_tokens = token_allocation.file_tokens - reserve_tokens
-                    logger.debug(
-                        f"[FILES] {self.name}: Using passed model context for {model_context.model_name}: "
-                        f"{token_allocation.file_tokens:,} file tokens from {token_allocation.total_tokens:,} total"
-                    )
-                except Exception as e:
-                    logger.warning(f"[FILES] {self.name}: Error using passed model context: {e}")
-                    # Fall through to manual calculation
-                    model_context = None
-
-            if not model_context:
-                # Manual calculation as fallback
-                # Try to use the stored model context first
-                if hasattr(self, "_model_context") and self._model_context:
-                    model_context = self._model_context
-                    effective_max_tokens = model_context.calculate_token_allocation().content_tokens - reserve_tokens
-                    logger.debug(f"[FILES] {self.name}: Using stored model context for {model_context.model_name}")
-                else:
-                    # Ultimate fallback for edge cases
-                    from config import DEFAULT_MODEL
-
-                    model_name = getattr(self, "_current_model_name", None) or DEFAULT_MODEL
-
-                    # Handle auto mode gracefully
-                    if model_name.lower() == "auto":
-                        from providers.registry import ModelProviderRegistry
-
-                        # Use tool-specific fallback model for capacity estimation
-                        # This properly handles different providers (OpenAI=200K, Gemini=1M)
-                        tool_category = self.get_model_category()
-                        fallback_model = ModelProviderRegistry.get_preferred_fallback_model(tool_category)
-                        logger.debug(
-                            f"[FILES] {self.name}: Auto mode detected, using {fallback_model} "
-                            f"for {tool_category.value} tool capacity estimation"
-                        )
-
-                        try:
-                            provider = self.get_model_provider(fallback_model)
-                            capabilities = provider.get_capabilities(fallback_model)
-
-                            # Calculate content allocation based on model capacity
-                            if capabilities.context_window < 300_000:
-                                # Smaller context models: 60% content, 40% response
-                                model_content_tokens = int(capabilities.context_window * 0.6)
-                            else:
-                                # Larger context models: 80% content, 20% response
-                                model_content_tokens = int(capabilities.context_window * 0.8)
-
-                            effective_max_tokens = model_content_tokens - reserve_tokens
-                            logger.debug(
-                                f"[FILES] {self.name}: Using {fallback_model} capacity for auto mode: "
-                                f"{model_content_tokens:,} content tokens from {capabilities.context_window:,} total"
-                            )
-                        except (ValueError, AttributeError) as e:
-                            # Handle specific errors: provider not found, model not supported, missing attributes
-                            logger.warning(
-                                f"[FILES] {self.name}: Could not get capabilities for fallback model {fallback_model}: {type(e).__name__}: {e}"
-                            )
-                            # Fall back to conservative default for safety
-                            effective_max_tokens = 100_000 - reserve_tokens
-                        except Exception as e:
-                            # Catch any other unexpected errors
-                            logger.error(
-                                f"[FILES] {self.name}: Unexpected error getting model capabilities: {type(e).__name__}: {e}"
-                            )
-                            effective_max_tokens = 100_000 - reserve_tokens
-                    else:
-                        # Normal mode - use the specified model
-                        try:
-                            provider = self.get_model_provider(model_name)
-                            capabilities = provider.get_capabilities(model_name)
-
-                            # Calculate content allocation based on model capacity
-                            if capabilities.context_window < 300_000:
-                                # Smaller context models: 60% content, 40% response
-                                model_content_tokens = int(capabilities.context_window * 0.6)
-                            else:
-                                # Larger context models: 80% content, 20% response
-                                model_content_tokens = int(capabilities.context_window * 0.8)
-
-                            effective_max_tokens = model_content_tokens - reserve_tokens
-                            logger.debug(
-                                f"[FILES] {self.name}: Using model-specific limit for {model_name}: "
-                                f"{model_content_tokens:,} content tokens from {capabilities.context_window:,} total"
-                            )
-                        except (ValueError, AttributeError) as e:
-                            # Handle specific errors: provider not found, model not supported, missing attributes
-                            logger.warning(
-                                f"[FILES] {self.name}: Could not get model capabilities for {model_name}: {type(e).__name__}: {e}"
-                            )
-                            # Fall back to conservative default for safety
-                            effective_max_tokens = 100_000 - reserve_tokens
-                        except Exception as e:
-                            # Catch any other unexpected errors
-                            logger.error(
-                                f"[FILES] {self.name}: Unexpected error getting model capabilities: {type(e).__name__}: {e}"
-                            )
-                            effective_max_tokens = 100_000 - reserve_tokens
+            # This is now the single source of truth for token allocation.
+            model_context = self._model_context
+            try:
+                token_allocation = model_context.calculate_token_allocation()
+                # Standardize on `file_tokens` for consistency and correctness.
+                # This fixes the bug where the old code incorrectly used content_tokens
+                effective_max_tokens = token_allocation.file_tokens - reserve_tokens
+                logger.debug(
+                    f"[FILES] {self.name}: Using model context for {model_context.model_name}: "
+                    f"{token_allocation.file_tokens:,} file tokens from {token_allocation.total_tokens:,} total"
+                )
+            except Exception as e:
+                logger.error(
+                    f"[FILES] {self.name}: Failed to calculate token allocation from model context: {e}", exc_info=True
+                )
+                # If the context exists but calculation fails, we still need to prevent a crash.
+                # A loud error is logged, and we fall back to a safe default.
+                effective_max_tokens = 100_000 - reserve_tokens
 
         # Ensure we have a reasonable minimum budget
         effective_max_tokens = max(1000, effective_max_tokens)
@@ -1094,8 +1049,14 @@ When recommending searches, be specific about what information you need and why 
 
         # Get model capabilities to check image support and size limits
         try:
-            provider = self.get_model_provider(model_name)
-            capabilities = provider.get_capabilities(model_name)
+            # Use the already-resolved provider from model context if available
+            if hasattr(self, "_model_context") and self._model_context:
+                provider = self._model_context.provider
+                capabilities = self._model_context.capabilities
+            else:
+                # Fallback for edge cases (e.g., direct test calls)
+                provider = self.get_model_provider(model_name)
+                capabilities = provider.get_capabilities(model_name)
         except Exception as e:
             logger.warning(f"Failed to get capabilities for model {model_name}: {e}")
             # Fall back to checking custom models configuration
@@ -1917,8 +1878,14 @@ When recommending searches, be specific about what information you need and why 
             Tuple of (corrected_temperature, warning_messages)
         """
         try:
-            provider = self.get_model_provider(model_name)
-            capabilities = provider.get_capabilities(model_name)
+            # Use the already-resolved provider and capabilities from model context
+            if hasattr(self, "_model_context") and self._model_context:
+                capabilities = self._model_context.capabilities
+            else:
+                # Fallback for edge cases (e.g., direct test calls)
+                provider = self.get_model_provider(model_name)
+                capabilities = provider.get_capabilities(model_name)
+
             constraint = capabilities.temperature_constraint
 
             warnings = []

@@ -186,6 +186,64 @@ class ConsensusTool(BaseTool):
     def get_request_model(self):
         return ConsensusRequest
 
+    def format_conversation_turn(self, turn) -> list[str]:
+        """
+        Format consensus turns with individual model responses for better readability.
+
+        This custom formatting shows the individual model responses that were
+        synthesized into the consensus, making it easier to understand the
+        reasoning behind the final recommendation.
+        """
+        parts = []
+
+        # Add files context if present
+        if turn.files:
+            parts.append(f"Files used in this turn: {', '.join(turn.files)}")
+            parts.append("")
+
+        # Check if this is a consensus turn with individual responses
+        if turn.model_metadata and turn.model_metadata.get("individual_responses"):
+            individual_responses = turn.model_metadata["individual_responses"]
+
+            # Add consensus header
+            models_consulted = []
+            for resp in individual_responses:
+                model = resp["model"]
+                stance = resp.get("stance", "neutral")
+                if stance != "neutral":
+                    models_consulted.append(f"{model}:{stance}")
+                else:
+                    models_consulted.append(model)
+
+            parts.append(f"Models consulted: {', '.join(models_consulted)}")
+            parts.append("")
+            parts.append("=== INDIVIDUAL MODEL RESPONSES ===")
+            parts.append("")
+
+            # Add each successful model response
+            for i, response in enumerate(individual_responses):
+                model_name = response["model"]
+                stance = response.get("stance", "neutral")
+                verdict = response["verdict"]
+
+                stance_label = f"({stance.title()} Stance)" if stance != "neutral" else "(Neutral Analysis)"
+                parts.append(f"**{model_name.upper()} {stance_label}**:")
+                parts.append(verdict)
+
+                if i < len(individual_responses) - 1:
+                    parts.append("")
+                    parts.append("---")
+                parts.append("")
+
+            parts.append("=== END INDIVIDUAL RESPONSES ===")
+            parts.append("")
+            parts.append("Claude's Synthesis:")
+
+        # Add the actual content
+        parts.append(turn.content)
+
+        return parts
+
     def _parse_model_and_stance(self, model_entry: str) -> tuple[str, str]:
         """Parse model entry like 'o3:against' into model and stance."""
         if ":" in model_entry:
@@ -509,11 +567,20 @@ Be skeptical and thorough in identifying issues while remaining constructive."""
         # Prepare the consensus prompt
         consensus_prompt = await self.prepare_prompt(request)
 
-        # Get providers for valid model combinations
+        # Get providers for valid model combinations with caching to avoid duplicate lookups
         providers_and_models = []
+        provider_cache = {}  # Cache to avoid duplicate provider lookups
+
         for model_name, stance in valid_combinations:
             try:
-                provider = self.get_model_provider(model_name)
+                # Check cache first
+                if model_name in provider_cache:
+                    provider = provider_cache[model_name]
+                else:
+                    # Look up provider and cache it
+                    provider = self.get_model_provider(model_name)
+                    provider_cache[model_name] = provider
+
                 providers_and_models.append((provider, model_name, stance))
             except Exception as e:
                 # Track failed models
