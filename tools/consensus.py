@@ -646,19 +646,6 @@ of the evidence, even when it strongly points in one direction.""",
         # Validate and create request
         request = ConsensusRequest(**arguments)
 
-        # Handle conversation continuation if specified
-        if request.continuation_id:
-            from utils.conversation_memory import build_conversation_history, get_thread
-
-            thread_context = get_thread(request.continuation_id)
-            if thread_context:
-                # Build conversation history using the same pattern as other tools
-                conversation_context, _ = build_conversation_history(thread_context, self._model_context)
-                if conversation_context:
-                    # Add conversation context to the beginning of the prompt
-                    enhanced_prompt = f"{conversation_context}\n\n{request.prompt}"
-                    request.prompt = enhanced_prompt
-
         # Validate model configurations and enforce limits
         valid_configs, skipped_entries = self._validate_model_combinations(request.models)
 
@@ -679,6 +666,19 @@ of the evidence, even when it strongly points in one direction.""",
             # Use the first model as the representative for token calculations
             first_model = valid_configs[0].model if valid_configs else "flash"
             self._model_context = ModelContext(first_model)
+
+        # Handle conversation continuation if specified
+        if request.continuation_id:
+            from utils.conversation_memory import build_conversation_history, get_thread
+
+            thread_context = get_thread(request.continuation_id)
+            if thread_context:
+                # Build conversation history using the same pattern as other tools
+                conversation_context, _ = build_conversation_history(thread_context, self._model_context)
+                if conversation_context:
+                    # Add conversation context to the beginning of the prompt
+                    enhanced_prompt = f"{conversation_context}\n\n{request.prompt}"
+                    request.prompt = enhanced_prompt
 
         # Prepare the consensus prompt
         consensus_prompt = await self.prepare_prompt(request)
