@@ -477,7 +477,9 @@ of the evidence, even when it strongly points in one direction.""",
 
         for i, (provider, model_config) in enumerate(provider_configs):
             try:
-                logger.debug(f"Processing {model_config.model}:{model_config.stance} sequentially ({i+1}/{len(provider_configs)})")
+                logger.debug(
+                    f"Processing {model_config.model}:{model_config.stance} sequentially ({i+1}/{len(provider_configs)})"
+                )
 
                 # Direct synchronous call - matches pattern of other tools
                 response = self._get_single_response(provider, model_config, prompt, request)
@@ -485,16 +487,17 @@ of the evidence, even when it strongly points in one direction.""",
 
             except Exception as e:
                 logger.error(f"Failed to get response from {model_config.model}:{model_config.stance}: {str(e)}")
-                responses.append({
-                    "model": model_config.model,
-                    "stance": model_config.stance,
-                    "status": "error",
-                    "error": f"Unhandled exception: {str(e)}",
-                })
+                responses.append(
+                    {
+                        "model": model_config.model,
+                        "stance": model_config.stance,
+                        "status": "error",
+                        "error": f"Unhandled exception: {str(e)}",
+                    }
+                )
 
         logger.debug(f"Sequential processing completed for {len(responses)} models")
         return responses
-
 
     def _format_consensus_output(self, responses: list[dict[str, Any]], skipped_entries: list[str]) -> str:
         """Format the consensus responses into structured output for Claude."""
@@ -645,11 +648,16 @@ of the evidence, even when it strongly points in one direction.""",
 
         # Handle conversation continuation if specified
         if request.continuation_id:
-            conversation_context = await self.get_conversation_context(request.continuation_id)
-            if conversation_context:
-                # Add conversation context to the beginning of the prompt
-                enhanced_prompt = f"{conversation_context}\n\n{request.prompt}"
-                request.prompt = enhanced_prompt
+            from utils.conversation_memory import build_conversation_history, get_thread
+
+            thread_context = get_thread(request.continuation_id)
+            if thread_context:
+                # Build conversation history using the same pattern as other tools
+                conversation_context, _ = build_conversation_history(thread_context, self._model_context)
+                if conversation_context:
+                    # Add conversation context to the beginning of the prompt
+                    enhanced_prompt = f"{conversation_context}\n\n{request.prompt}"
+                    request.prompt = enhanced_prompt
 
         # Validate model configurations and enforce limits
         valid_configs, skipped_entries = self._validate_model_combinations(request.models)

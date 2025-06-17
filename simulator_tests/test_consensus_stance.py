@@ -36,7 +36,7 @@ class TestConsensusStance(BaseSimulatorTest):
                         },
                         {
                             "model": "flash",
-                            "stance": "against", 
+                            "stance": "against",
                             "stance_prompt": "Focus on technical complexity issues.",
                         },
                     ],
