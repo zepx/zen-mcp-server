@@ -1325,7 +1325,7 @@ When recommending searches, be specific about what information you need and why 
                 model_name = resolved_model_name
                 logger.debug(f"Using pre-resolved model '{model_name}' from MCP boundary")
             else:
-                # Fallback for backward compatibility (e.g., tests calling execute directly)
+                # Fallback for direct execute calls
                 model_name = getattr(request, "model", None)
                 if not model_name:
                     from config import DEFAULT_MODEL

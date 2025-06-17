@@ -196,9 +196,7 @@ def detect_file_type(file_path: str) -> str:
     """
     Detect file type for appropriate processing strategy.
 
-    NOTE: This function is currently not used for line number auto-detection
-    due to backward compatibility requirements. It is intended for future
-    features requiring specific file type handling (e.g., image processing,
+    This function is intended for specific file type handling (e.g., image processing,
     binary file analysis, or enhanced file filtering).
 
     Args:
@@ -247,7 +245,7 @@ def should_add_line_numbers(file_path: str, include_line_numbers: Optional[bool]
     if include_line_numbers is not None:
         return include_line_numbers
 
-    # Default: DO NOT add line numbers (backwards compatibility)
+    # Default: DO NOT add line numbers
     # Tools that want line numbers must explicitly request them
     return False
 

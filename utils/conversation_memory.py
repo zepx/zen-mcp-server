@@ -884,7 +884,7 @@ def build_conversation_history(context: ThreadContext, model_context=None, read_
                     history_parts.append("(No accessible files found)")
                     logger.debug(f"[FILES] No accessible files found from {len(files_to_include)} planned files")
             else:
-                # Fallback to original read_files function for backward compatibility
+                # Fallback to original read_files function
                 files_content = read_files_func(all_files)
                 if files_content:
                     # Add token validation for the combined file content

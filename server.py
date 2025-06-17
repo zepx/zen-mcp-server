@@ -576,7 +576,7 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
         # Create model context with resolved model and option
         model_context = ModelContext(model_name, model_option)
         arguments["_model_context"] = model_context
-        arguments["_resolved_model_name"] = model_name  # For backward compatibility during transition
+        arguments["_resolved_model_name"] = model_name
         logger.debug(
             f"Model context created for {model_name} with {model_context.capabilities.context_window} token capacity"
         )
@@ -1065,9 +1065,10 @@ async def handle_get_prompt(name: str, arguments: dict[str, Any] = None) -> GetP
     """
     logger.debug(f"MCP client requested prompt: {name} with args: {arguments}")
 
-    # Parse structured prompt names like "chat:o3" or "chat:continue"
+    # Parse structured prompt names like "chat:o3", "chat:continue", or "consensus:flash:for,o3:against,pro:neutral"
     parsed_model = None
     is_continuation = False
+    consensus_models = None
     base_name = name
 
     if ":" in name:
@@ -1079,6 +1080,10 @@ async def handle_get_prompt(name: str, arguments: dict[str, Any] = None) -> GetP
         if second_part.lower() == "continue":
             is_continuation = True
             logger.debug(f"Parsed continuation prompt: tool='{base_name}', continue=True")
+        elif base_name == "consensus" and "," in second_part:
+            # Handle consensus tool format: "consensus:flash:for,o3:against,pro:neutral"
+            consensus_models = ConsensusTool.parse_structured_prompt_models(second_part)
+            logger.debug(f"Parsed consensus prompt with models: {consensus_models}")
         else:
             parsed_model = second_part
             logger.debug(f"Parsed structured prompt: tool='{base_name}', model='{parsed_model}'")
@@ -1148,6 +1153,18 @@ async def handle_get_prompt(name: str, arguments: dict[str, Any] = None) -> GetP
         else:
             # "/zen:chat:continue" case
             tool_instruction = f"Continue the previous conversation using the {tool_name} tool"
+    elif consensus_models:
+        # "/zen:consensus:flash:for,o3:against,pro:neutral" case
+        model_descriptions = []
+        for model_config in consensus_models:
+            if model_config["stance"] != "neutral":
+                model_descriptions.append(f"{model_config['model']} with {model_config['stance']} stance")
+            else:
+                model_descriptions.append(f"{model_config['model']} with neutral stance")
+
+        models_text = ", ".join(model_descriptions)
+        models_json = str(consensus_models).replace("'", '"')  # Convert to JSON-like format for Claude
+        tool_instruction = f"Use the {tool_name} tool with models: {models_text}. Call the consensus tool with prompt='debate this proposal' and models={models_json}"
     elif parsed_model:
         # "/zen:chat:o3" case
         tool_instruction = f"Use the {tool_name} tool with model '{parsed_model}'"
