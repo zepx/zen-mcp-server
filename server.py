@@ -550,7 +550,13 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
             arguments["_parsed_models"] = parsed_models
             logger.debug(f"Consensus tool: parsed {len(parsed_models)} models with options")
 
-            # Skip the standard model resolution for consensus
+            # Set up model context for consensus (using default model for base class compatibility)
+            model_context = ModelContext(model_name, model_option)
+            arguments["_model_context"] = model_context
+            arguments["_resolved_model_name"] = model_name
+            logger.debug(f"Model context created for consensus with default model {model_name}")
+
+            # Execute consensus tool with proper context setup
             result = await tool.execute(arguments)
             logger.info(f"Tool '{name}' execution completed")
 
@@ -1240,4 +1246,8 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        # Handle graceful shutdown
+        pass

@@ -106,17 +106,8 @@ DEFAULT_THINKING_MODE_THINKDEEP = os.getenv("DEFAULT_THINKING_MODE_THINKDEEP", "
 DEFAULT_CONSENSUS_TIMEOUT = 120.0  # 2 minutes per model
 DEFAULT_CONSENSUS_MAX_INSTANCES_PER_COMBINATION = 2
 
-# Provider concurrency limits for consensus tool
-CONSENSUS_PROVIDER_CONCURRENCY = {
-    "openai": 2,  # Limit OpenAI to 2 concurrent calls
-    "google": 5,  # Gemini can handle more concurrent calls
-    "groq": 10,  # Groq is generally faster
-    "xai": 3,  # Conservative limit for X.AI
-    "anthropic": 3,  # Conservative for Anthropic
-    "ollama": 2,  # Local models - be conservative
-    "openrouter": 5,  # OpenRouter proxy
-}
-DEFAULT_CONSENSUS_CONCURRENCY = 5  # Fallback for unknown providers
+# NOTE: Consensus tool now uses sequential processing for MCP compatibility
+# Concurrent processing was removed to avoid async pattern violations
 
 # MCP Protocol Transport Limits
 #

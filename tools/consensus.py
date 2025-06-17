@@ -13,12 +13,7 @@ from pydantic import Field, field_validator
 if TYPE_CHECKING:
     from tools.models import ToolModelCategory
 
-from config import (
-    CONSENSUS_PROVIDER_CONCURRENCY,
-    DEFAULT_CONSENSUS_CONCURRENCY,
-    DEFAULT_CONSENSUS_MAX_INSTANCES_PER_COMBINATION,
-    DEFAULT_CONSENSUS_TIMEOUT,
-)
+from config import DEFAULT_CONSENSUS_MAX_INSTANCES_PER_COMBINATION
 from systemprompts import CONSENSUS_PROMPT
 
 from .base import BaseTool, ToolRequest
@@ -75,11 +70,6 @@ class ConsensusTool(BaseTool):
 
     def __init__(self):
         super().__init__()
-        # Per-provider semaphores for rate limiting using config values
-        self._provider_semaphores = {
-            provider: asyncio.Semaphore(limit) for provider, limit in CONSENSUS_PROVIDER_CONCURRENCY.items()
-        }
-        self._default_semaphore = asyncio.Semaphore(DEFAULT_CONSENSUS_CONCURRENCY)  # Fallback for unknown providers
 
     def get_name(self) -> str:
         return "consensus"
@@ -404,101 +394,84 @@ of the evidence, even when it strongly points in one direction.""",
         # Inject stance into the system prompt
         return base_prompt.replace("{stance_prompt}", stance_prompt)
 
-    async def _get_single_response(
+    def _get_single_response(
         self, provider, model_name: str, stance: str, prompt: str, request: ConsensusRequest
     ) -> dict[str, Any]:
-        """Get response from a single model with proper error handling and timeouts."""
-        # Handle provider type safely - some providers return string, others return Enum
-        ptype = provider.get_provider_type()
-        provider_type = getattr(ptype, "value", ptype)
-        semaphore = self._provider_semaphores.get(provider_type, self._default_semaphore)
+        """Get response from a single model with MCP-safe synchronous processing."""
+        logger.debug(f"Getting response from {model_name} with stance '{stance}'")
 
-        async with semaphore:  # Rate limiting per provider
-            try:
-                # Apply timeout to prevent hanging
-                response = await asyncio.wait_for(
-                    asyncio.to_thread(  # Best practice for wrapping sync functions
-                        provider.generate_content,
-                        prompt=prompt,
-                        model_name=model_name,
-                        system_prompt=self._get_stance_enhanced_prompt(stance),
-                        temperature=getattr(request, "temperature", self.get_default_temperature()),
-                        thinking_mode=getattr(request, "thinking_mode", "medium"),
-                        images=getattr(request, "images", None) or [],
-                    ),
-                    timeout=DEFAULT_CONSENSUS_TIMEOUT,  # Configurable timeout per model
-                )
-                return {
-                    "model": model_name,
-                    "stance": stance,
-                    "status": "success",
-                    "verdict": response.content,  # Contains structured Markdown
-                    "metadata": {
-                        "provider": getattr(provider.get_provider_type(), "value", provider.get_provider_type()),
-                        "usage": response.usage if hasattr(response, "usage") else None,
-                    },
-                }
-            except asyncio.TimeoutError:
-                return {
-                    "model": model_name,
-                    "stance": stance,
-                    "status": "error",
-                    "error": f"Request timed out after {DEFAULT_CONSENSUS_TIMEOUT} seconds",
-                }
-            except Exception as e:
-                return {"model": model_name, "stance": stance, "status": "error", "error": str(e)}
+        try:
+            # Direct synchronous call, no async complexity or threading
+            # Rate limiting removed for simplicity - sequential processing provides natural rate limiting
+            response = provider.generate_content(
+                prompt=prompt,
+                model_name=model_name,
+                system_prompt=self._get_stance_enhanced_prompt(stance),
+                temperature=getattr(request, "temperature", None) or self.get_default_temperature(),
+                thinking_mode=getattr(request, "thinking_mode", "medium"),
+                images=getattr(request, "images", None) or [],
+            )
+            return {
+                "model": model_name,
+                "stance": stance,
+                "status": "success",
+                "verdict": response.content,  # Contains structured Markdown
+                "metadata": {
+                    "provider": getattr(provider.get_provider_type(), "value", provider.get_provider_type()),
+                    "usage": response.usage if hasattr(response, "usage") else None,
+                },
+            }
+        except Exception as e:
+            logger.error(f"Error getting response from {model_name}:{stance}: {str(e)}")
+            return {"model": model_name, "stance": stance, "status": "error", "error": str(e)}
 
     async def _get_consensus_responses(
         self, providers_and_models: list[tuple], prompt: str, request: ConsensusRequest
     ) -> list[dict[str, Any]]:
-        """Execute all model requests concurrently with proper error handling."""
+        """Execute all model requests with MCP-safe sequential processing."""
 
-        # Create tasks for all model requests
-        tasks = []
+        responses = []
+
+        # MCP-SAFE: Simple sequential processing without thread pools
+        # This avoids event loop interference and is more reliable for MCP
         for provider, model_name, stance in providers_and_models:
-            task = self._get_single_response(provider, model_name, stance, prompt, request)
-            tasks.append(task)
+            try:
+                logger.debug(f"Processing {model_name}:{stance} sequentially")
 
-        # Execute all requests concurrently with proper error handling
-        responses = await asyncio.gather(*tasks, return_exceptions=True)
+                # Direct synchronous call - simple and MCP-safe
+                # Sequential processing provides natural rate limiting
+                response = self._get_single_response(provider, model_name, stance, prompt, request)
+                responses.append(response)
 
-        # Process responses and handle any gather-level exceptions
-        processed_responses = []
-        for i, resp in enumerate(responses):
-            if isinstance(resp, Exception):
-                # Extract model info from the original provider list for error reporting
-                try:
-                    _, model_name, stance = providers_and_models[i]
-                    processed_responses.append(
-                        {
-                            "model": model_name,
-                            "stance": stance,
-                            "status": "error",
-                            "error": f"Unhandled exception: {str(resp)}",
-                        }
-                    )
-                except IndexError:
-                    processed_responses.append(
-                        {
-                            "model": "unknown",
-                            "stance": "unknown",
-                            "status": "error",
-                            "error": f"Unhandled exception: {str(resp)}",
-                        }
-                    )
-            else:
-                processed_responses.append(resp)
+                # Brief yield to allow MCP to process any pending messages
+                # This is critical for MCP stability during long operations
+                await asyncio.sleep(0.2)
 
-        return processed_responses
+            except Exception as e:
+                logger.error(f"Failed to get response from {model_name}:{stance}: {str(e)}")
+                responses.append(
+                    {
+                        "model": model_name,
+                        "stance": stance,
+                        "status": "error",
+                        "error": f"Unhandled exception: {str(e)}",
+                    }
+                )
+
+        return responses
 
     def _format_consensus_output(self, responses: list[dict[str, Any]], skipped_entries: list[str]) -> str:
         """Format the consensus responses into structured output for Claude."""
+
+        logger.debug(f"Formatting consensus output for {len(responses)} responses")
 
         # Separate successful and failed responses
         successful_responses = [r for r in responses if r["status"] == "success"]
         failed_responses = [r for r in responses if r["status"] == "error"]
 
-        # Prepare the structured output
+        logger.debug(f"Successful responses: {len(successful_responses)}, Failed: {len(failed_responses)}")
+
+        # Prepare the structured output (minimize size for MCP stability)
         models_used = [
             f"{r['model']}:{r['stance']}" if r["stance"] != "neutral" else r["model"] for r in successful_responses
         ]
@@ -506,12 +479,35 @@ of the evidence, even when it strongly points in one direction.""",
             f"{r['model']}:{r['stance']}" if r["stance"] != "neutral" else r["model"] for r in failed_responses
         ]
 
+        # Prepare clean responses without truncation
+        clean_responses = []
+        for r in responses:
+            if r["status"] == "success":
+                clean_responses.append(
+                    {
+                        "model": r["model"],
+                        "stance": r["stance"],
+                        "status": r["status"],
+                        "verdict": r.get("verdict", ""),
+                        "metadata": r.get("metadata", {}),
+                    }
+                )
+            else:
+                clean_responses.append(
+                    {
+                        "model": r["model"],
+                        "stance": r["stance"],
+                        "status": r["status"],
+                        "error": r.get("error", "Unknown error"),
+                    }
+                )
+
         output_data = {
             "status": "consensus_success" if successful_responses else "consensus_failed",
             "models_used": models_used,
             "models_skipped": skipped_entries,
             "models_errored": models_errored,
-            "responses": responses,  # Include all responses for transparency
+            "responses": clean_responses,
             "next_steps": self._get_synthesis_guidance(successful_responses, failed_responses),
         }
 
@@ -602,6 +598,9 @@ of the evidence, even when it strongly points in one direction.""",
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         """Execute consensus gathering from multiple models."""
 
+        # Store arguments for base class methods
+        self._current_arguments = arguments
+
         # Check if we have pre-parsed models from server.py
         if "_parsed_models" in arguments:
             # Reconstruct the models list with stance format for validation
@@ -641,6 +640,15 @@ of the evidence, even when it strongly points in one direction.""",
             }
             return [TextContent(type="text", text=json.dumps(error_output, indent=2))]
 
+        # Set up a dummy model context for consensus since we handle multiple models
+        # This is needed for base class methods like prepare_prompt to work
+        if not hasattr(self, "_model_context") or not self._model_context:
+            from utils.model_context import ModelContext
+
+            # Use the first model as the representative for token calculations
+            first_model = valid_combinations[0][0] if valid_combinations else "flash"
+            self._model_context = ModelContext(first_model)
+
         # Prepare the consensus prompt
         consensus_prompt = await self.prepare_prompt(request)
 
@@ -674,7 +682,9 @@ of the evidence, even when it strongly points in one direction.""",
             return [TextContent(type="text", text=json.dumps(error_output, indent=2))]
 
         # Send to all models asynchronously
+        logger.debug(f"Sending consensus request to {len(providers_and_models)} models")
         responses = await self._get_consensus_responses(providers_and_models, consensus_prompt, request)
+        logger.debug(f"Received {len(responses)} responses from consensus models")
 
         # Enforce minimum success requirement - must have at least 1 successful response
         successful_responses = [r for r in responses if r["status"] == "success"]
@@ -692,8 +702,15 @@ of the evidence, even when it strongly points in one direction.""",
             }
             return [TextContent(type="text", text=json.dumps(error_output, indent=2))]
 
+        # Yield before formatting to give MCP breathing room
+        await asyncio.sleep(0.1)
+
         # Structure the output and store in conversation memory
         consensus_output = self._format_consensus_output(responses, skipped_entries)
+
+        # Log response size for debugging
+        output_size = len(consensus_output)
+        logger.debug(f"Consensus output size: {output_size:,} characters")
 
         # Store in conversation memory if continuation_id is provided
         if request.continuation_id:

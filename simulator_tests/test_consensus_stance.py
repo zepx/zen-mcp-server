@@ -24,10 +24,11 @@ class TestConsensusStance(BaseSimulatorTest):
             self.logger.info("Testing consensus tool with explicit flash:for and flash:against stances")
 
             # Send request with explicit stances as user requested
+            # Using shorter prompt to stay within subprocess timeout limits
             response, continuation_id = self.call_mcp_tool(
                 "consensus",
                 {
-                    "prompt": "How about I add a button to order pizza directly to my log_analyzer app?",
+                    "prompt": "Add pizza button: good idea?",
                     "models": ["flash:for", "flash:against"],
                     "model": "flash",  # Default model for Claude's synthesis
                 },
@@ -54,6 +55,17 @@ class TestConsensusStance(BaseSimulatorTest):
 
             if consensus_data["status"] != "consensus_success":
                 self.logger.error(f"Consensus failed with status: {consensus_data['status']}")
+
+                # Log additional error details for debugging
+                if "error" in consensus_data:
+                    self.logger.error(f"Error message: {consensus_data['error']}")
+                if "models_errored" in consensus_data:
+                    self.logger.error(f"Models that errored: {consensus_data['models_errored']}")
+                if "models_skipped" in consensus_data:
+                    self.logger.error(f"Models skipped: {consensus_data['models_skipped']}")
+                if "next_steps" in consensus_data:
+                    self.logger.error(f"Suggested next steps: {consensus_data['next_steps']}")
+
                 return False
 
             # Check that both models were used with their stances
@@ -132,7 +144,7 @@ class TestConsensusStance(BaseSimulatorTest):
             response2, _ = self.call_mcp_tool(
                 "consensus",
                 {
-                    "prompt": "Should we implement a real-time notification system?",
+                    "prompt": "Real-time notifications: worth it?",
                     "models": ["o3:support", "pro:oppose"],
                     "model": "flash",
                 },
