@@ -53,7 +53,7 @@ ls -lh logs/mcp_*.log*
 - 10 rotated files for mcp_server.log (200MB total)
 - 5 rotated files for mcp_activity.log (100MB total)
 
-**Why logs don't appear in docker compose logs**: The MCP stdio_server captures stderr during tool execution to prevent interference with the JSON-RPC protocol communication. This means that while you'll see startup logs in `docker compose logs`, you won't see tool execution logs there.
+**Why logs appear in files**: The MCP stdio_server captures stderr during tool execution to prevent interference with the JSON-RPC protocol communication. This means tool execution logs are written to files rather than displayed in console output.
 
 #### Running All Simulator Tests
 ```bash
@@ -88,8 +88,6 @@ python communication_simulator_test.py --list-tests
 # Run multiple specific tests (not all)
 python communication_simulator_test.py --tests basic_conversation content_validation
 
-# Force Docker environment rebuild before running tests
-python communication_simulator_test.py --rebuild
 ```
 
 ### Code Quality Checks

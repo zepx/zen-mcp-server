@@ -161,9 +161,9 @@ class TestUserHomeEnvironmentVariable:
     def test_get_home_directory_uses_pathlib(self):
         """Test that get_user_home_directory always uses Path.home()."""
         with patch("pathlib.Path.home") as mock_home:
-            mock_home.return_value = Path("/home/dockeruser")
+            mock_home.return_value = Path("/home/testuser")
             home = get_user_home_directory()
-            assert home == Path("/home/dockeruser")
+            assert home == Path("/home/testuser")
             # Verify Path.home() was called
             mock_home.assert_called_once()
 

@@ -734,18 +734,10 @@ class OpenAICompatibleProvider(ModelProvider):
                 # Handle data URL: data:image/png;base64,iVBORw0...
                 return {"type": "image_url", "image_url": {"url": image_path}}
             else:
-                # Handle file path - translate for Docker environment
-                from utils.file_utils import translate_path_for_environment
-
-                translated_path = translate_path_for_environment(image_path)
-                logging.debug(f"Translated image path from '{image_path}' to '{translated_path}'")
-
-                if not os.path.exists(translated_path):
-                    logging.warning(f"Image file not found: {translated_path} (original: {image_path})")
+                # Handle file path
+                if not os.path.exists(image_path):
+                    logging.warning(f"Image file not found: {image_path}")
                     return None
-
-                # Use translated path for all subsequent operations
-                image_path = translated_path
 
                 # Detect MIME type from file extension using centralized mappings
                 from utils.file_types import get_image_mime_type

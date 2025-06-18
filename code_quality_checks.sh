@@ -13,7 +13,7 @@ echo "================================================="
 if [[ -f ".zen_venv/bin/python" ]]; then
     PYTHON_CMD=".zen_venv/bin/python"
     PIP_CMD=".zen_venv/bin/pip"
-    echo "✅ Using virtual environment directly"
+    echo "✅ Using venv"
 elif [[ -n "$VIRTUAL_ENV" ]]; then
     PYTHON_CMD="python"
     PIP_CMD="pip"

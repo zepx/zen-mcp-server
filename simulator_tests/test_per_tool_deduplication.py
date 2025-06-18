@@ -8,7 +8,7 @@ Validates that:
 1. Files are embedded only once in conversation history
 2. Continuation calls don't re-read existing files
 3. New files are still properly embedded
-4. Docker logs show deduplication behavior
+4. Server logs show deduplication behavior
 """
 
 import os

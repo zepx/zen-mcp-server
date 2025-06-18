@@ -580,11 +580,9 @@ def _plan_file_inclusion_by_size(all_files: list[str], max_file_tokens: int) -> 
 
     for file_path in all_files:
         try:
-            from utils.file_utils import estimate_file_tokens, translate_path_for_environment
+            from utils.file_utils import estimate_file_tokens
 
-            translated_path = translate_path_for_environment(file_path)
-
-            if os.path.exists(translated_path) and os.path.isfile(translated_path):
+            if os.path.exists(file_path) and os.path.isfile(file_path):
                 # Use centralized token estimation for consistency
                 estimated_tokens = estimate_file_tokens(file_path)
 
@@ -602,7 +600,7 @@ def _plan_file_inclusion_by_size(all_files: list[str], max_file_tokens: int) -> 
             else:
                 files_to_skip.append(file_path)
                 # More descriptive message for missing files
-                if not os.path.exists(translated_path):
+                if not os.path.exists(file_path):
                     logger.debug(
                         f"[FILES] Skipping {file_path} - file no longer exists (may have been moved/deleted since conversation)"
                     )
@@ -840,10 +838,7 @@ def build_conversation_history(context: ThreadContext, model_context=None, read_
                     except Exception as e:
                         # More descriptive error handling for missing files
                         try:
-                            from utils.file_utils import translate_path_for_environment
-
-                            translated_path = translate_path_for_environment(file_path)
-                            if not os.path.exists(translated_path):
+                            if not os.path.exists(file_path):
                                 logger.info(
                                     f"File no longer accessible for conversation history: {file_path} - file was moved/deleted since conversation (marking as excluded)"
                                 )

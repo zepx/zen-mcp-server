@@ -279,23 +279,6 @@ def _add_line_numbers(content: str) -> str:
     return "\n".join(numbered_lines)
 
 
-def translate_path_for_environment(path_str: str) -> str:
-    """
-    Minimal path translation for standalone Python mode.
-
-    In standalone mode, we don't need any path translation.
-    This function is kept for compatibility but simply passes through paths.
-
-    Args:
-        path_str: Original path string from the client
-
-    Returns:
-        Path unchanged - no translation needed
-    """
-    # No translation needed for standalone mode
-    return path_str
-
-
 def resolve_and_validate_path(path_str: str) -> Path:
     """
     Resolves and validates a path against security policies.
@@ -339,25 +322,6 @@ def resolve_and_validate_path(path_str: str) -> Path:
         )
 
     return resolved_path
-
-
-def translate_file_paths(file_paths: Optional[list[str]]) -> Optional[list[str]]:
-    """
-    Translate a list of file paths for the current environment.
-
-    This function should be used by all tools to consistently handle path translation
-    for file lists. It applies the unified path translation to each path in the list.
-
-    Args:
-        file_paths: List of file paths to translate, or None
-
-    Returns:
-        List of translated paths, or None if input was None
-    """
-    if not file_paths:
-        return file_paths
-
-    return [translate_path_for_environment(path) for path in file_paths]
 
 
 def expand_paths(paths: list[str], extensions: Optional[set[str]] = None) -> list[str]:
@@ -661,12 +625,10 @@ def estimate_file_tokens(file_path: str) -> int:
         Estimated token count for the file
     """
     try:
-        translated_path = translate_path_for_environment(file_path)
-
-        if not os.path.exists(translated_path) or not os.path.isfile(translated_path):
+        if not os.path.exists(file_path) or not os.path.isfile(file_path):
             return 0
 
-        file_size = os.path.getsize(translated_path)
+        file_size = os.path.getsize(file_path)
 
         # Get the appropriate ratio for this file type
         from .file_types import get_token_estimation_ratio
@@ -811,11 +773,10 @@ def read_json_file(file_path: str) -> Optional[dict]:
         Parsed JSON data as dict, or None if file doesn't exist or invalid
     """
     try:
-        translated_path = translate_path_for_environment(file_path)
-        if not os.path.exists(translated_path):
+        if not os.path.exists(file_path):
             return None
 
-        with open(translated_path, encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError):
         return None
@@ -834,10 +795,9 @@ def write_json_file(file_path: str, data: dict, indent: int = 2) -> bool:
         True if successful, False otherwise
     """
     try:
-        translated_path = translate_path_for_environment(file_path)
-        os.makedirs(os.path.dirname(translated_path), exist_ok=True)
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
-        with open(translated_path, "w", encoding="utf-8") as f:
+        with open(file_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=indent, ensure_ascii=False)
         return True
     except (OSError, TypeError):
@@ -855,9 +815,8 @@ def get_file_size(file_path: str) -> int:
         File size in bytes, or 0 if file doesn't exist or error
     """
     try:
-        translated_path = translate_path_for_environment(file_path)
-        if os.path.exists(translated_path) and os.path.isfile(translated_path):
-            return os.path.getsize(translated_path)
+        if os.path.exists(file_path) and os.path.isfile(file_path):
+            return os.path.getsize(file_path)
         return 0
     except OSError:
         return 0
@@ -874,8 +833,7 @@ def ensure_directory_exists(file_path: str) -> bool:
         True if directory exists or was created, False on error
     """
     try:
-        translated_path = translate_path_for_environment(file_path)
-        directory = os.path.dirname(translated_path)
+        directory = os.path.dirname(file_path)
         if directory:
             os.makedirs(directory, exist_ok=True)
         return True
@@ -910,15 +868,14 @@ def read_file_safely(file_path: str, max_size: int = 10 * 1024 * 1024) -> Option
         File content as string, or None if file too large or unreadable
     """
     try:
-        translated_path = translate_path_for_environment(file_path)
-        if not os.path.exists(translated_path) or not os.path.isfile(translated_path):
+        if not os.path.exists(file_path) or not os.path.isfile(file_path):
             return None
 
-        file_size = os.path.getsize(translated_path)
+        file_size = os.path.getsize(file_path)
         if file_size > max_size:
             return None
 
-        with open(translated_path, encoding="utf-8", errors="ignore") as f:
+        with open(file_path, encoding="utf-8", errors="ignore") as f:
             return f.read()
     except OSError:
         return None

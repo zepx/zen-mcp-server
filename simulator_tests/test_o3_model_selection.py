@@ -4,7 +4,7 @@ O3 Model Selection Test
 
 Tests that O3 models are properly selected and used when explicitly specified,
 regardless of the default model configuration (even when set to auto).
-Validates model selection via Docker logs.
+Validates model selection via server logs.
 """
 
 import datetime

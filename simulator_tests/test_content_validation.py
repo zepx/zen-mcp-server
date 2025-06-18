@@ -115,7 +115,7 @@ DATABASE_CONFIG = {
             else:
                 self.logger.warning("  ⚠️  Different tool failed")
 
-            # Validate file processing behavior from Docker logs
+            # Validate file processing behavior from server logs
             self.logger.info("  4: Validating file processing logs")
             logs = self.get_server_logs_since(start_time)
 

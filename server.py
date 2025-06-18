@@ -1171,7 +1171,7 @@ async def main():
     # Validate and configure providers based on available API keys
     configure_providers()
 
-    # Log startup message for Docker log monitoring
+    # Log startup message
     logger.info("Zen MCP Server starting up...")
     logger.info(f"Log level: {log_level}")
 

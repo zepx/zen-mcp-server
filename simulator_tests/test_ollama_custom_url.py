@@ -208,7 +208,7 @@ if __name__ == "__main__":
         ]
 
         # Special handling for clarification requests from local models
-        if "clarification_required" in response.lower():
+        if "files_required_to_continue" in response.lower():
             if files_provided:
                 # If we provided actual files, clarification request is a FAILURE
                 self.logger.error(
@@ -224,7 +224,7 @@ if __name__ == "__main__":
                 self.logger.debug(f"Clarification response: {response[:200]}...")
                 return True
 
-        # Check for SSRF security restriction - this is expected for local URLs from Docker
+        # Check for SSRF security restriction - this is expected for local URLs
         if "restricted IP address" in response and "security risk (SSRF)" in response:
             self.logger.info(
                 f"✅ Custom URL routing working - {test_name} correctly attempted to connect to custom API"

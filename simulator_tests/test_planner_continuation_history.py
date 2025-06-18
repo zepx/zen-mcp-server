@@ -244,7 +244,7 @@ class PlannerContinuationHistoryTest(BaseSimulatorTest):
             response2, _ = self.call_mcp_tool(
                 "planner",
                 {
-                    "step": "Deployment strategy: Use Kubernetes for container orchestration with Helm charts. Implement CI/CD pipeline with GitOps. Use service mesh (Istio) for traffic management, monitoring, and security. Deploy databases in separate namespaces with backup automation.",
+                    "step": "Deployment strategy: Use Kubernetes for orchestration with Helm charts. Implement CI/CD pipeline with GitOps. Use service mesh (Istio) for traffic management, monitoring, and security. Deploy databases in separate namespaces with backup automation.",
                     "step_number": 2,
                     "total_steps": 2,
                     "next_step_required": False,  # Complete the session

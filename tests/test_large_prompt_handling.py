@@ -246,9 +246,9 @@ class TestLargePromptHandling:
 
         assert len(result) == 1
         output = json.loads(result[0].text)
-        # The precommit tool may return success or clarification_required depending on git state
+        # The precommit tool may return success or files_required_to_continue depending on git state
         # The core fix ensures large prompts are detected at the right time
-        assert output["status"] in ["success", "clarification_required", "resend_prompt"]
+        assert output["status"] in ["success", "files_required_to_continue", "resend_prompt"]
 
     @pytest.mark.asyncio
     async def test_debug_large_error_description(self, large_prompt):

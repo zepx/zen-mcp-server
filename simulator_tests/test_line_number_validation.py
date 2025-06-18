@@ -145,7 +145,7 @@ def validate_data(data):
             # Test 4: Validate log patterns
             self.logger.info("  1.4: Validating line number processing in logs")
 
-            # Get logs from container
+            # Get logs from server
             try:
                 log_file_path = "logs/mcp_server.log"
                 with open(log_file_path) as f:
