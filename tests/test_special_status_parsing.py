@@ -229,7 +229,7 @@ class TestSpecialStatusParsing:
                         input_data[field]
                     ), f"Enhanced {field} should start with original value in {input_data['status']} response"
                     assert (
-                        "IMPORTANT GUIDANCE FOR CLAUDE:" in parsed_content[field]
+                        "IMPORTANT GUIDANCE:" in parsed_content[field]
                     ), f"Enhanced {field} should contain guidance in {input_data['status']} response"
                 else:
                     assert (

@@ -64,7 +64,7 @@ class TestDynamicContextRequests:
         # Check that the enhanced instructions contain the original message and additional guidance
         expected_start = "I need to see the package.json file to understand dependencies"
         assert clarification["mandatory_instructions"].startswith(expected_start)
-        assert "IMPORTANT GUIDANCE FOR CLAUDE:" in clarification["mandatory_instructions"]
+        assert "IMPORTANT GUIDANCE:" in clarification["mandatory_instructions"]
         assert "Use FULL absolute paths" in clarification["mandatory_instructions"]
         assert clarification["files_needed"] == ["package.json", "package-lock.json"]
 
@@ -231,7 +231,7 @@ class TestDynamicContextRequests:
         assert enhanced.startswith(original)
 
         # Verify additional guidance is added
-        assert "IMPORTANT GUIDANCE FOR CLAUDE:" in enhanced
+        assert "IMPORTANT GUIDANCE:" in enhanced
         assert "CRITICAL for providing accurate analysis" in enhanced
         assert "Use FULL absolute paths" in enhanced
         assert "continuation_id to continue" in enhanced
