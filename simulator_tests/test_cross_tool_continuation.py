@@ -119,11 +119,12 @@ class CrossToolContinuationTest(ConversationBaseTest):
 
             # Start with analyze
             analyze_response, analyze_id = self.call_mcp_tool_direct(
-                "analyze", {
-                    "files": [self.test_files["python"]], 
+                "analyze",
+                {
+                    "files": [self.test_files["python"]],
                     "prompt": "Analyze this code for quality and performance issues",
-                    "model": "flash"
-                }
+                    "model": "flash",
+                },
             )
 
             if not analyze_response or not analyze_id:
