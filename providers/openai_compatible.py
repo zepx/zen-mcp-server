@@ -197,26 +197,70 @@ class OpenAICompatibleProvider(ModelProvider):
     def client(self):
         """Lazy initialization of OpenAI client with security checks and timeout configuration."""
         if self._client is None:
-            client_kwargs = {
-                "api_key": self.api_key,
-            }
+            import os
 
-            if self.base_url:
-                client_kwargs["base_url"] = self.base_url
+            import httpx
 
-            if self.organization:
-                client_kwargs["organization"] = self.organization
+            # Temporarily disable proxy environment variables to prevent httpx from detecting them
+            original_env = {}
+            proxy_env_vars = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"]
 
-            # Add default headers if any
-            if self.DEFAULT_HEADERS:
-                client_kwargs["default_headers"] = self.DEFAULT_HEADERS.copy()
+            for var in proxy_env_vars:
+                if var in os.environ:
+                    original_env[var] = os.environ[var]
+                    del os.environ[var]
 
-            # Add configured timeout settings
-            if hasattr(self, "timeout_config") and self.timeout_config:
-                client_kwargs["timeout"] = self.timeout_config
-                logging.debug(f"OpenAI client initialized with custom timeout: {self.timeout_config}")
+            try:
+                # Create a custom httpx client that explicitly avoids proxy parameters
+                timeout_config = (
+                    self.timeout_config
+                    if hasattr(self, "timeout_config") and self.timeout_config
+                    else httpx.Timeout(30.0)
+                )
 
-            self._client = OpenAI(**client_kwargs)
+                # Create httpx client with minimal config to avoid proxy conflicts
+                # Note: proxies parameter was removed in httpx 0.28.0
+                http_client = httpx.Client(
+                    timeout=timeout_config,
+                    follow_redirects=True,
+                )
+
+                # Keep client initialization minimal to avoid proxy parameter conflicts
+                client_kwargs = {
+                    "api_key": self.api_key,
+                    "http_client": http_client,
+                }
+
+                if self.base_url:
+                    client_kwargs["base_url"] = self.base_url
+
+                if self.organization:
+                    client_kwargs["organization"] = self.organization
+
+                # Add default headers if any
+                if self.DEFAULT_HEADERS:
+                    client_kwargs["default_headers"] = self.DEFAULT_HEADERS.copy()
+
+                logging.debug(f"OpenAI client initialized with custom httpx client and timeout: {timeout_config}")
+
+                # Create OpenAI client with custom httpx client
+                self._client = OpenAI(**client_kwargs)
+
+            except Exception as e:
+                # If all else fails, try absolute minimal client without custom httpx
+                logging.warning(f"Failed to create client with custom httpx, falling back to minimal config: {e}")
+                try:
+                    minimal_kwargs = {"api_key": self.api_key}
+                    if self.base_url:
+                        minimal_kwargs["base_url"] = self.base_url
+                    self._client = OpenAI(**minimal_kwargs)
+                except Exception as fallback_error:
+                    logging.error(f"Even minimal OpenAI client creation failed: {fallback_error}")
+                    raise
+            finally:
+                # Restore original proxy environment variables
+                for var, value in original_env.items():
+                    os.environ[var] = value
 
         return self._client
 
@@ -476,7 +520,7 @@ class OpenAICompatibleProvider(ModelProvider):
 
                 # Log retry attempt
                 logging.warning(
-                    f"{self.FRIENDLY_NAME} API error for model {model_name}, attempt {attempt + 1}/{max_retries}: {str(e)}. Retrying in {delay}s..."
+                    f"{self.FRIENDLY_NAME} error for model {model_name}, attempt {attempt + 1}/{max_retries}: {str(e)}. Retrying in {delay}s..."
                 )
                 time.sleep(delay)
 

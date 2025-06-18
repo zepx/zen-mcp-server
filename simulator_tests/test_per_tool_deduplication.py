@@ -13,10 +13,10 @@ Validates that:
 
 import os
 
-from .base_test import BaseSimulatorTest
+from .conversation_base_test import ConversationBaseTest
 
 
-class PerToolDeduplicationTest(BaseSimulatorTest):
+class PerToolDeduplicationTest(ConversationBaseTest):
     """Test file deduplication for each individual tool"""
 
     @property
@@ -33,6 +33,9 @@ class PerToolDeduplicationTest(BaseSimulatorTest):
         """Test file deduplication with realistic precommit/codereview workflow"""
         try:
             self.logger.info("📄 Test: Simplified file deduplication with precommit/codereview workflow")
+
+            # Setup test environment for conversation testing
+            self.setUp()
 
             # Setup test files
             self.setup_test_files()
@@ -64,7 +67,7 @@ def divide(x, y):
                 "model": "flash",
             }
 
-            response1, continuation_id = self.call_mcp_tool("precommit", precommit_params)
+            response1, continuation_id = self.call_mcp_tool_direct("precommit", precommit_params)
             if not response1:
                 self.logger.error("  ❌ Step 1: precommit tool failed")
                 return False
@@ -89,7 +92,7 @@ def divide(x, y):
                 "model": "flash",
             }
 
-            response2, _ = self.call_mcp_tool("codereview", codereview_params)
+            response2, _ = self.call_mcp_tool_direct("codereview", codereview_params)
             if not response2:
                 self.logger.error("  ❌ Step 2: codereview tool failed")
                 return False
@@ -119,7 +122,7 @@ def subtract(a, b):
                 "model": "flash",
             }
 
-            response3, _ = self.call_mcp_tool("precommit", continue_params)
+            response3, _ = self.call_mcp_tool_direct("precommit", continue_params)
             if not response3:
                 self.logger.error("  ❌ Step 3: precommit continuation failed")
                 return False
