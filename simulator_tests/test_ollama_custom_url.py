@@ -35,7 +35,7 @@ class OllamaCustomUrlTest(BaseSimulatorTest):
             if not custom_url:
                 self.logger.warning("CUSTOM_API_URL not set in Docker container, skipping Ollama test")
                 self.logger.info("To enable this test, add to .env file:")
-                self.logger.info("CUSTOM_API_URL=http://host.docker.internal:11434/v1")
+                self.logger.info("CUSTOM_API_URL=http://localhost:11434/v1")
                 self.logger.info("CUSTOM_API_KEY=")
                 self.logger.info("Then restart docker-compose")
                 return True  # Skip gracefully

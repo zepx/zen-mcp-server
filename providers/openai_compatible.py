@@ -151,10 +151,6 @@ class OpenAICompatibleProvider(ModelProvider):
             if hostname in ["localhost", "127.0.0.1", "::1"]:
                 return True
 
-            # Check for Docker internal hostnames (like host.docker.internal)
-            if hostname and ("docker.internal" in hostname or "host.docker.internal" in hostname):
-                return True
-
             # Check for private network ranges (local network)
             if hostname:
                 try:

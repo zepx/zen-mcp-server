@@ -1936,7 +1936,7 @@ When recommending searches, be specific about what information you need and why 
             elif "gpt" in model_name.lower() or "o3" in model_name.lower():
                 # Register OpenAI provider if not already registered
                 from providers.base import ProviderType
-                from providers.openai import OpenAIModelProvider
+                from providers.openai_provider import OpenAIModelProvider
 
                 ModelProviderRegistry.register_provider(ProviderType.OPENAI, OpenAIModelProvider)
                 provider = ModelProviderRegistry.get_provider(ProviderType.OPENAI)

@@ -298,17 +298,26 @@ class TestLargePromptHandling:
             )
             mock_get_provider.return_value = mock_provider
 
-            # Mock the centralized file preparation method to avoid file system access
-            with patch.object(tool, "_prepare_file_content_for_prompt") as mock_prepare_files:
-                mock_prepare_files.return_value = ("File content", [other_file])
+            # Mock handle_prompt_file to verify prompt.txt is handled
+            with patch.object(tool, "handle_prompt_file") as mock_handle_prompt:
+                # Return the prompt content and updated files list (without prompt.txt)
+                mock_handle_prompt.return_value = ("Large prompt content from file", [other_file])
 
-                await tool.execute({"prompt": "", "files": [temp_prompt_file, other_file]})
+                # Mock the centralized file preparation method
+                with patch.object(tool, "_prepare_file_content_for_prompt") as mock_prepare_files:
+                    mock_prepare_files.return_value = ("File content", [other_file])
 
-                # Verify prompt.txt was removed from files list
-                mock_prepare_files.assert_called_once()
-                files_arg = mock_prepare_files.call_args[0][0]
-                assert len(files_arg) == 1
-                assert files_arg[0] == other_file
+                    # Use a small prompt to avoid triggering size limit
+                    await tool.execute({"prompt": "Test prompt", "files": [temp_prompt_file, other_file]})
+
+                    # Verify handle_prompt_file was called with the original files list
+                    mock_handle_prompt.assert_called_once_with([temp_prompt_file, other_file])
+
+                    # Verify _prepare_file_content_for_prompt was called with the updated files list (without prompt.txt)
+                    mock_prepare_files.assert_called_once()
+                    files_arg = mock_prepare_files.call_args[0][0]
+                    assert len(files_arg) == 1
+                    assert files_arg[0] == other_file
 
         temp_dir = os.path.dirname(temp_prompt_file)
         shutil.rmtree(temp_dir)

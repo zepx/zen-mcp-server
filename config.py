@@ -136,7 +136,7 @@ DEFAULT_CONSENSUS_MAX_INSTANCES_PER_COMBINATION = 2
 # What is NOT limited by this constant:
 # - System prompts added internally by tools
 # - File content embedded by tools
-# - Conversation history loaded from Redis
+# - Conversation history loaded from storage
 # - Web search instructions or other internal additions
 # - Complete prompts sent to external models (managed by model-specific token limits)
 #
@@ -145,6 +145,5 @@ DEFAULT_CONSENSUS_MAX_INSTANCES_PER_COMBINATION = 2
 MCP_PROMPT_SIZE_LIMIT = 50_000  # 50K characters (user input only)
 
 # Threading configuration
-# Simple Redis-based conversation threading for stateless MCP environment
-# Set REDIS_URL environment variable to connect to your Redis instance
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+# Simple in-memory conversation threading for stateless MCP environment
+# Conversations persist only during the Claude session
