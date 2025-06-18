@@ -6,6 +6,20 @@ stateless MCP (Model Context Protocol) environments. It enables multi-turn
 conversations between Claude and Gemini by storing conversation state in memory
 across independent request cycles.
 
+CRITICAL ARCHITECTURAL REQUIREMENT:
+This conversation memory system is designed for PERSISTENT MCP SERVER PROCESSES.
+It uses in-memory storage that persists only within a single Python process.
+
+⚠️  IMPORTANT: This system will NOT work correctly if MCP tool calls are made
+    as separate subprocess invocations (each subprocess starts with empty memory).
+
+    WORKING SCENARIO: Claude Desktop with persistent MCP server process
+    FAILING SCENARIO: Simulator tests calling server.py as individual subprocesses
+
+    Root cause of test failures: Each subprocess call loses the conversation
+    state from previous calls because memory is process-specific, not shared
+    across subprocess boundaries.
+
 ARCHITECTURE OVERVIEW:
 The MCP protocol is inherently stateless - each tool request is independent
 with no memory of previous interactions. This module bridges that gap by:

@@ -5,12 +5,17 @@ This module provides a thread-safe, in-memory alternative to Redis for storing
 conversation contexts. It's designed for ephemeral MCP server sessions where
 conversations only need to persist during a single Claude session.
 
+⚠️  PROCESS-SPECIFIC STORAGE: This storage is confined to a single Python process.
+    Data stored in one process is NOT accessible from other processes or subprocesses.
+    This is why simulator tests that run server.py as separate subprocesses cannot
+    share conversation state between tool calls.
+
 Key Features:
 - Thread-safe operations using locks
 - TTL support with automatic expiration
 - Background cleanup thread for memory management
-- Singleton pattern for consistent state
-- Drop-in replacement for Redis storage
+- Singleton pattern for consistent state within a single process
+- Drop-in replacement for Redis storage (for single-process scenarios)
 """
 
 import logging
@@ -43,7 +48,7 @@ class InMemoryStorage:
             f"In-memory storage initialized with {timeout_hours}h timeout, cleanup every {self._cleanup_interval//60}m"
         )
 
-    def set_with_ttl(self, key: str, value: str, ttl_seconds: int) -> None:
+    def set_with_ttl(self, key: str, ttl_seconds: int, value: str) -> None:
         """Store value with expiration time"""
         with self._lock:
             expires_at = time.time() + ttl_seconds
@@ -66,7 +71,7 @@ class InMemoryStorage:
 
     def setex(self, key: str, ttl_seconds: int, value: str) -> None:
         """Redis-compatible setex method"""
-        self.set_with_ttl(key, value, ttl_seconds)
+        self.set_with_ttl(key, ttl_seconds, value)
 
     def _cleanup_worker(self):
         """Background thread that periodically cleans up expired entries"""
