@@ -12,7 +12,6 @@ Validates that:
 """
 
 import os
-import subprocess
 
 from .base_test import BaseSimulatorTest
 
@@ -28,68 +27,7 @@ class PerToolDeduplicationTest(BaseSimulatorTest):
     def test_description(self) -> str:
         return "File deduplication for individual tools"
 
-    def get_docker_logs_since(self, since_time: str) -> str:
-        """Get docker logs since a specific timestamp"""
-        try:
-            # Check both main server and log monitor for comprehensive logs
-            cmd_server = ["docker", "logs", "--since", since_time, self.container_name]
-            cmd_monitor = ["docker", "logs", "--since", since_time, "zen-mcp-log-monitor"]
-
-            result_server = subprocess.run(cmd_server, capture_output=True, text=True)
-            result_monitor = subprocess.run(cmd_monitor, capture_output=True, text=True)
-
-            # Get the internal log files which have more detailed logging
-            server_log_result = subprocess.run(
-                ["docker", "exec", self.container_name, "cat", "/tmp/mcp_server.log"], capture_output=True, text=True
-            )
-
-            activity_log_result = subprocess.run(
-                ["docker", "exec", self.container_name, "cat", "/tmp/mcp_activity.log"], capture_output=True, text=True
-            )
-
-            # Combine all logs
-            combined_logs = (
-                result_server.stdout
-                + "\n"
-                + result_monitor.stdout
-                + "\n"
-                + server_log_result.stdout
-                + "\n"
-                + activity_log_result.stdout
-            )
-            return combined_logs
-        except Exception as e:
-            self.logger.error(f"Failed to get docker logs: {e}")
-            return ""
-
     # create_additional_test_file method now inherited from base class
-
-    def validate_file_deduplication_in_logs(self, logs: str, tool_name: str, test_file: str) -> bool:
-        """Validate that logs show file deduplication behavior"""
-        # Look for file embedding messages
-        embedding_messages = [
-            line for line in logs.split("\n") if "📁" in line and "embedding" in line and tool_name in line
-        ]
-
-        # Look for deduplication/filtering messages
-        filtering_messages = [
-            line for line in logs.split("\n") if "📁" in line and "Filtering" in line and tool_name in line
-        ]
-        skipping_messages = [
-            line for line in logs.split("\n") if "📁" in line and "skipping" in line and tool_name in line
-        ]
-
-        deduplication_found = len(filtering_messages) > 0 or len(skipping_messages) > 0
-
-        if deduplication_found:
-            self.logger.info(f"  ✅ {tool_name}: Found deduplication evidence in logs")
-            for msg in filtering_messages + skipping_messages:
-                self.logger.debug(f"    📁 {msg.strip()}")
-        else:
-            self.logger.warning(f"  ⚠️ {tool_name}: No deduplication evidence found in logs")
-            self.logger.debug(f"  📁 All embedding messages: {embedding_messages}")
-
-        return deduplication_found
 
     def run_test(self) -> bool:
         """Test file deduplication with realistic precommit/codereview workflow"""
@@ -188,9 +126,9 @@ def subtract(a, b):
 
             self.logger.info("  ✅ Step 3: precommit continuation completed")
 
-            # Validate results in docker logs
+            # Validate results in server logs
             self.logger.info("  📋 Validating conversation history and file deduplication...")
-            logs = self.get_docker_logs_since(start_time)
+            logs = self.get_server_logs_since(start_time)
 
             # Check for conversation history building
             conversation_logs = [
@@ -249,7 +187,7 @@ def subtract(a, b):
                 return True
             else:
                 self.logger.warning("  ⚠️ File deduplication workflow test: FAILED")
-                self.logger.warning("  💡 Check docker logs for detailed file embedding and continuation activity")
+                self.logger.warning("  💡 Check server logs for detailed file embedding and continuation activity")
                 return False
 
         except Exception as e:

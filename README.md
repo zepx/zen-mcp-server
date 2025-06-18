@@ -163,12 +163,11 @@ cd zen-mcp-server
 ```
 
 **What this does:**
-- **Creates Python virtual environment** automatically
-- **Installs all dependencies** in an isolated environment
-- **Creates .env file** (automatically uses `$GEMINI_API_KEY` and `$OPENAI_API_KEY` if set in environment)
-- **Validates API keys** and ensures at least one is configured
-- **Adds Zen to Claude Code automatically** (if Claude CLI is installed)
-- **Shows setup instructions** for manual Claude Desktop configuration
+- **Sets up everything automatically** - Python environment, dependencies, configuration
+- **Configures Claude integrations** - Adds to Claude Code CLI and guides Desktop setup
+- **Ready to use immediately** - No manual configuration needed
+
+**After updates:** Always run `./run-server.sh` again after `git pull` to ensure everything stays current.
 
 ### 3. Add Your API Keys
 
@@ -196,41 +195,11 @@ If you were already running a `claude` code session, please exit and start a new
 
 #### If Setting up for Claude Desktop
 
-1. **Launch Claude Desktop**
-- Open Claude Desktop
-- Go to **Settings** → **Developer** → **Edit Config**
+**Need the exact configuration?** Run `./run-server.sh -c` to display the platform-specific setup instructions with correct paths.
 
-This will open a folder revealing `claude_desktop_config.json`.
-
-2. **Add Configuration**
-
-The setup script shows you the exact configuration. Copy this into your `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "zen": {
-      "command": "/path/to/zen-mcp-server/.zen_venv/bin/python",
-      "args": ["/path/to/zen-mcp-server/server.py"]
-    }
-  }
-}
-```
-
-**Note**: Replace `/path/to/zen-mcp-server` with the actual path shown by the setup script.
-
-If you have other MCP servers listed, add this after them with a comma:
-```json
-  ... other mcp servers ... ,
-
-  "zen": {
-      "command": "/path/to/zen-mcp-server/.zen_venv/bin/python",
-      "args": ["/path/to/zen-mcp-server/server.py"]
-  }
-```
-
-3. **Restart Claude Desktop**
-Completely quit and restart Claude Desktop for the changes to take effect.
+1. **Open Claude Desktop config**: Settings → Developer → Edit Config
+2. **Copy the configuration** shown by `./run-server.sh -c` into your `claude_desktop_config.json`
+3. **Restart Claude Desktop** for changes to take effect
 
 ### 4. Start Using It!
 

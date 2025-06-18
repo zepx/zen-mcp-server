@@ -66,7 +66,7 @@ See [Logging Documentation](logging.md) for more details on accessing logs.
 
 **"Connection failed" in Claude Desktop**
 - Ensure the server path is correct in your Claude config
-- Run `./run-server.sh` again to see the correct configuration
+- Run `./run-server.sh` to verify setup and see configuration
 - Check that Python is installed: `python3 --version`
 
 **"API key environment variable is required"**
@@ -85,7 +85,7 @@ See [Logging Documentation](logging.md) for more details on accessing logs.
 
 **Virtual Environment Problems**
 ```bash
-# Remove and recreate virtual environment
+# Reset environment completely
 rm -rf .zen_venv
 ./run-server.sh
 ```

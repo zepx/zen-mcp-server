@@ -21,6 +21,7 @@ readonly NC='\033[0m' # No Color
 # Configuration
 readonly VENV_PATH=".zen_venv"
 readonly DOCKER_CLEANED_FLAG=".docker_cleaned"
+readonly DESKTOP_CONFIG_FLAG=".desktop_configured"
 readonly LOG_DIR="logs"
 readonly LOG_FILE="mcp_server.log"
 
@@ -233,12 +234,12 @@ setup_venv() {
     
     # Always use venv Python
     if [[ -f "$venv_python" ]]; then
-        echo "$venv_python"
         if [[ -n "${VIRTUAL_ENV:-}" ]]; then
-            print_success "Using activated virtual environment"
-        else
-            print_info "Using virtual environment directly (no activation needed)"
+            print_success "Using activated virtual environment" >&2
         fi
+        # Convert to absolute path for MCP registration
+        local abs_venv_python=$(cd "$(dirname "$venv_python")" && pwd)/$(basename "$venv_python")
+        echo "$abs_venv_python"
         return 0
     else
         print_error "Virtual environment Python not found"
@@ -426,13 +427,28 @@ validate_api_keys() {
 # Claude Integration Functions
 # ----------------------------------------------------------------------------
 
-# Check if MCP is added to Claude and verify it's correct
-check_claude_integration() {
+# Check if MCP is added to Claude CLI and verify it's correct
+check_claude_cli_integration() {
     local python_cmd="$1"
     local server_path="$2"
     
     if ! command -v claude &> /dev/null; then
-        return 2  # Claude CLI not installed
+        echo ""
+        print_warning "Claude CLI not found"
+        echo ""
+        read -p "Would you like to add Zen to Claude Code? (Y/n): " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Nn]$ ]]; then
+            print_info "Skipping Claude Code integration"
+            return 0
+        fi
+        
+        echo ""
+        echo "Please install Claude Code first:"
+        echo "  Visit: https://docs.anthropic.com/en/docs/claude-code/cli-usage"
+        echo ""
+        echo "Then run this script again to register MCP."
+        return 1
     fi
     
     # Check if zen is registered
@@ -440,17 +456,17 @@ check_claude_integration() {
     if echo "$mcp_list" | grep -q "zen"; then
         # Check if it's using the old Docker command
         if echo "$mcp_list" | grep -E "zen.*docker|zen.*compose" &>/dev/null; then
-            print_warning "Found old Docker-based MCP registration, updating..."
-            claude mcp remove zen 2>/dev/null || true
+            print_warning "Found old Docker-based Zen registration, updating..."
+            claude mcp remove zen -s user 2>/dev/null || true
             
             # Re-add with correct Python command
             if claude mcp add zen -s user -- "$python_cmd" "$server_path" 2>/dev/null; then
-                print_success "Updated MCP 'zen' to use standalone Python"
+                print_success "Updated Zen to become a standalone script"
                 return 0
             else
                 echo ""
                 echo "Failed to update MCP registration. Please run manually:"
-                echo "  claude mcp remove zen"
+                echo "  claude mcp remove zen -s user"
                 echo "  claude mcp add zen -s user -- $python_cmd $server_path"
                 return 1
             fi
@@ -458,54 +474,192 @@ check_claude_integration() {
             # Verify the registered path matches current setup
             local expected_cmd="$python_cmd $server_path"
             if echo "$mcp_list" | grep -F "$server_path" &>/dev/null; then
-                print_success "MCP 'zen' correctly configured"
                 return 0
             else
-                print_warning "MCP 'zen' registered with different path, updating..."
-                claude mcp remove zen 2>/dev/null || true
+                print_warning "Zen registered with different path, updating..."
+                claude mcp remove zen -s user 2>/dev/null || true
                 
                 if claude mcp add zen -s user -- "$python_cmd" "$server_path" 2>/dev/null; then
-                    print_success "Updated MCP 'zen' with current path"
+                    print_success "Updated Zen with current path"
                     return 0
                 else
                     echo ""
                     echo "Failed to update MCP registration. Please run manually:"
-                    echo "  claude mcp remove zen"
+                    echo "  claude mcp remove zen -s user"
                     echo "  claude mcp add zen -s user -- $python_cmd $server_path"
                     return 1
                 fi
             fi
         fi
     else
-        # Not registered at all, try to add it
+        # Not registered at all, ask user if they want to add it
         echo ""
-        print_info "Registering MCP 'zen' with Claude..."
+        read -p "Add Zen to Claude Code? (Y/n): " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Nn]$ ]]; then
+            print_info "To add manually later, run:"
+            echo "  claude mcp add zen -s user -- $python_cmd $server_path"
+            return 0
+        fi
+        
+        print_info "Registering Zen with Claude Code..."
         if claude mcp add zen -s user -- "$python_cmd" "$server_path" 2>/dev/null; then
-            print_success "Successfully added MCP 'zen' to Claude"
+            print_success "Successfully added Zen to Claude Code"
             return 0
         else
             echo ""
-            echo "To add to Claude CLI manually, run:"
+            echo "Failed to add automatically. To add manually, run:"
             echo "  claude mcp add zen -s user -- $python_cmd $server_path"
             return 1
         fi
     fi
 }
 
-# Display setup instructions
-display_setup_instructions() {
+# Check and update Claude Desktop configuration
+check_claude_desktop_integration() {
+    local python_cmd="$1"
+    local server_path="$2"
+    
+    # Skip if already configured (check flag)
+    if [[ -f "$DESKTOP_CONFIG_FLAG" ]]; then
+        return 0
+    fi
+    
+    local config_path=$(get_claude_config_path)
+    if [[ -z "$config_path" ]]; then
+        print_warning "Unable to determine Claude Desktop config path for this platform"
+        return 0
+    fi
+    
+    echo ""
+    read -p "Configure Zen for Claude Desktop? (Y/n): " -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Nn]$ ]]; then
+        print_info "Skipping Claude Desktop integration"
+        touch "$DESKTOP_CONFIG_FLAG"  # Don't ask again
+        return 0
+    fi
+    
+    # Create config directory if it doesn't exist
+    local config_dir=$(dirname "$config_path")
+    mkdir -p "$config_dir" 2>/dev/null || true
+    
+    # Handle existing config
+    if [[ -f "$config_path" ]]; then
+        print_info "Updating existing Claude Desktop config..."
+        
+        # Check for old Docker config and remove it
+        if grep -q "docker.*compose.*zen\|zen.*docker" "$config_path" 2>/dev/null; then
+            print_warning "Removing old Docker-based MCP configuration..."
+            # Create backup
+            cp "$config_path" "${config_path}.backup_$(date +%Y%m%d_%H%M%S)"
+            
+            # Remove old zen config using a more robust approach
+            local temp_file=$(mktemp)
+            python3 -c "
+import json
+import sys
+
+try:
+    with open('$config_path', 'r') as f:
+        config = json.load(f)
+    
+    # Remove zen from mcpServers if it exists
+    if 'mcpServers' in config and 'zen' in config['mcpServers']:
+        del config['mcpServers']['zen']
+        print('Removed old zen MCP configuration')
+    
+    with open('$temp_file', 'w') as f:
+        json.dump(config, f, indent=2)
+        
+except Exception as e:
+    print(f'Error processing config: {e}', file=sys.stderr)
+    sys.exit(1)
+" && mv "$temp_file" "$config_path"
+        fi
+        
+        # Add new config
+        local temp_file=$(mktemp)
+        python3 -c "
+import json
+import sys
+
+try:
+    with open('$config_path', 'r') as f:
+        config = json.load(f)
+except:
+    config = {}
+
+# Ensure mcpServers exists
+if 'mcpServers' not in config:
+    config['mcpServers'] = {}
+
+# Add zen server
+config['mcpServers']['zen'] = {
+    'command': '$python_cmd',
+    'args': ['$server_path']
+}
+
+with open('$temp_file', 'w') as f:
+    json.dump(config, f, indent=2)
+" && mv "$temp_file" "$config_path"
+        
+    else
+        print_info "Creating new Claude Desktop config..."
+        cat > "$config_path" << EOF
+{
+  "mcpServers": {
+    "zen": {
+      "command": "$python_cmd",
+      "args": ["$server_path"]
+    }
+  }
+}
+EOF
+    fi
+    
+    if [[ $? -eq 0 ]]; then
+        print_success "Successfully configured Claude Desktop"
+        echo "  Config: $config_path"
+        echo "  Restart Claude Desktop to use the new MCP server"
+        touch "$DESKTOP_CONFIG_FLAG"
+    else
+        print_error "Failed to update Claude Desktop config"
+        echo "Manual config location: $config_path"
+        echo "Add this configuration:"
+        cat << EOF
+{
+  "mcpServers": {
+    "zen": {
+      "command": "$python_cmd",
+      "args": ["$server_path"]
+    }
+  }
+}
+EOF
+    fi
+}
+
+# Display configuration instructions
+display_config_instructions() {
     local python_cmd="$1"
     local server_path="$2"
     
     echo ""
-    echo "===== SETUP COMPLETE ====="
+    local config_header="ZEN MCP SERVER CONFIGURATION"
+    echo "===== $config_header ====="
+    printf '%*s\n' "$((${#config_header} + 12))" | tr ' ' '='
     echo ""
-    echo "To use Zen MCP Server:"
+    echo "To use Zen MCP Server with your Claude clients:"
     echo ""
-    echo "1. For Claude Code CLI:"
-    echo "   claude mcp add zen -s user -- $python_cmd $server_path"
+    
+    print_info "1. For Claude Code (CLI):"
+    echo -e "   ${GREEN}claude mcp add zen -s user -- $python_cmd $server_path${NC}"
     echo ""
-    echo "2. For Claude Desktop, add to config:"
+    
+    print_info "2. For Claude Desktop:"
+    echo "   Add this configuration to your Claude Desktop config file:"
+    echo ""
     cat << EOF
    {
      "mcpServers": {
@@ -521,13 +675,62 @@ EOF
     local config_path=$(get_claude_config_path)
     if [[ -n "$config_path" ]]; then
         echo ""
-        echo "   Config location: $config_path"
+        print_info "   Config file location:"
+        echo -e "   ${YELLOW}$config_path${NC}"
     fi
+    
+    echo ""
+    print_info "3. Restart Claude Desktop after updating the config file"
+    echo ""
+}
+
+# Display setup instructions
+display_setup_instructions() {
+    local python_cmd="$1"
+    local server_path="$2"
+    
+    echo ""
+    local setup_header="SETUP COMPLETE"
+    echo "===== $setup_header ====="
+    printf '%*s\n' "$((${#setup_header} + 12))" | tr ' ' '='
+    echo ""
+    print_success "Zen is ready to use!"
 }
 
 # ----------------------------------------------------------------------------
 # Log Management Functions
 # ----------------------------------------------------------------------------
+
+# Show help message
+show_help() {
+    local version=$(get_version)
+    local header="🤖 Zen MCP Server v$version"
+    echo "$header"
+    printf '%*s\n' "${#header}" | tr ' ' '='
+    echo ""
+    echo "Usage: $0 [OPTIONS]"
+    echo ""
+    echo "Options:"
+    echo "  -h, --help      Show this help message"
+    echo "  -v, --version   Show version information"
+    echo "  -f, --follow    Follow server logs in real-time"
+    echo "  -c, --config    Show configuration instructions for Claude clients"
+    echo ""
+    echo "Examples:"
+    echo "  $0              Setup and start the MCP server"
+    echo "  $0 -f           Setup and follow logs"
+    echo "  $0 -c           Show configuration instructions"
+    echo "  $0 --version    Show version only"
+    echo ""
+    echo "For more information, visit:"
+    echo "  https://github.com/BeehiveInnovations/zen-mcp-server"
+}
+
+# Show version only
+show_version() {
+    local version=$(get_version)
+    echo "$version"
+}
 
 # Follow logs
 follow_logs() {
@@ -549,9 +752,48 @@ follow_logs() {
 # ----------------------------------------------------------------------------
 
 main() {
+    # Parse command line arguments
+    local arg="${1:-}"
+    
+    case "$arg" in
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        -v|--version)
+            show_version
+            exit 0
+            ;;
+        -c|--config)
+            # Setup minimal environment to get paths for config display
+            local python_cmd
+            python_cmd=$(find_python) || exit 1
+            local new_python_cmd
+            new_python_cmd=$(setup_venv "$python_cmd")
+            python_cmd="$new_python_cmd"
+            local script_dir=$(get_script_dir)
+            local server_path="$script_dir/server.py"
+            display_config_instructions "$python_cmd" "$server_path"
+            exit 0
+            ;;
+        -f|--follow)
+            # Continue with normal setup then follow logs
+            ;;
+        "")
+            # Normal setup without following logs
+            ;;
+        *)
+            print_error "Unknown option: $arg"
+            echo ""
+            show_help
+            exit 1
+            ;;
+    esac
+    
     # Display header
-    echo "🤖 Zen MCP Server"
-    echo "================"
+    local main_header="🤖 Zen MCP Server"
+    echo "$main_header"
+    printf '%*s\n' "${#main_header}" | tr ' ' '='
     
     # Get and display version
     local version=$(get_version)
@@ -598,8 +840,9 @@ main() {
     # Step 9: Display setup instructions
     display_setup_instructions "$python_cmd" "$server_path"
     
-    # Step 10: Check Claude integration
-    check_claude_integration "$python_cmd" "$server_path"
+    # Step 10: Check Claude integrations
+    check_claude_cli_integration "$python_cmd" "$server_path"
+    check_claude_desktop_integration "$python_cmd" "$server_path"
     
     # Step 11: Display log information
     echo ""
@@ -607,10 +850,11 @@ main() {
     echo ""
     
     # Step 12: Handle command line arguments
-    if [[ "${1:-}" == "-f" ]] || [[ "${1:-}" == "--follow" ]]; then
+    if [[ "$arg" == "-f" ]] || [[ "$arg" == "--follow" ]]; then
         follow_logs
     else
         echo "To follow logs: ./run-server.sh -f"
+        echo "To show config: ./run-server.sh -c"
         echo "To update: git pull, then run ./run-server.sh again"
         echo ""
         echo "Happy Clauding! 🎉"

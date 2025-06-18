@@ -80,7 +80,7 @@ OPENROUTER_API_KEY=your-openrouter-api-key
 > **Note:** Control which models can be used directly in your OpenRouter dashboard at [openrouter.ai](https://openrouter.ai/). 
 > This gives you centralized control over model access and spending limits.
 
-That's it! Docker Compose already includes all necessary configuration.
+That's it! The setup script handles all necessary configuration automatically.
 
 ### Option 2: Custom API Setup (Ollama, vLLM, etc.)
 

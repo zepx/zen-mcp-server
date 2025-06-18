@@ -28,10 +28,18 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, Optional
 
-from mcp.server import Server
-from mcp.server.models import InitializationOptions
-from mcp.server.stdio import stdio_server
-from mcp.types import (
+from dotenv import load_dotenv
+
+# Load environment variables from .env file in the script's directory
+# This ensures .env is loaded regardless of the current working directory
+script_dir = Path(__file__).parent
+env_file = script_dir / ".env"
+load_dotenv(dotenv_path=env_file)
+
+from mcp.server import Server  # noqa: E402
+from mcp.server.models import InitializationOptions  # noqa: E402
+from mcp.server.stdio import stdio_server  # noqa: E402
+from mcp.types import (  # noqa: E402
     GetPromptResult,
     Prompt,
     PromptMessage,
@@ -42,13 +50,13 @@ from mcp.types import (
     ToolsCapability,
 )
 
-from config import (
+from config import (  # noqa: E402
     DEFAULT_MODEL,
     __author__,
     __updated__,
     __version__,
 )
-from tools import (
+from tools import (  # noqa: E402
     AnalyzeTool,
     ChatTool,
     CodeReviewTool,
@@ -62,7 +70,7 @@ from tools import (
     ThinkDeepTool,
     TracerTool,
 )
-from tools.models import ToolOutput
+from tools.models import ToolOutput  # noqa: E402
 
 # Configure logging for server operations
 # Can be controlled via LOG_LEVEL environment variable (DEBUG, INFO, WARNING, ERROR)
