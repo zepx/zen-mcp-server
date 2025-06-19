@@ -173,8 +173,8 @@ cleanup_docker() {
 # Python Environment Functions
 # ----------------------------------------------------------------------------
 
-# Find suitable Python command
-find_python() {
+# Find suitable Python command (silent version for command substitution)
+find_python_cmd() {
     # Prefer Python 3.12 for best compatibility
     local python_cmds=("python3.12" "python3.13" "python3.11" "python3.10" "python3" "python" "py")
     
@@ -188,21 +188,38 @@ find_python() {
                 # Check minimum version (3.10) for better library compatibility
                 if [[ $major_version -ge 10 ]]; then
                     echo "$cmd"
-                    print_success "Found Python: $version"
-                    
-                    # Recommend Python 3.12
-                    if [[ $major_version -ne 12 ]]; then
-                        print_info "Note: Python 3.12 is recommended for best compatibility."
-                    fi
-                    
                     return 0
                 fi
             fi
         fi
     done
     
-    print_error "Python 3.10+ not found. Please install Python 3.10 or newer (3.12 recommended)."
     return 1
+}
+
+# Find and display Python information (display only, never for command substitution)
+find_python_display() {
+    local python_cmd
+    python_cmd=$(find_python_cmd)
+    local exit_code=$?
+    
+    if [[ $exit_code -eq 0 ]]; then
+        local version=$($python_cmd --version 2>&1)
+        print_success "Found Python: $version"
+        
+        # Check if it's Python 3.12
+        if [[ $version =~ Python\ 3\.([0-9]+)\.([0-9]+) ]]; then
+            local major_version=${BASH_REMATCH[1]}
+            if [[ $major_version -ne 12 ]]; then
+                print_info "Note: Python 3.12 is recommended for best compatibility."
+            fi
+        fi
+        
+        return 0
+    else
+        print_error "Python 3.10+ not found. Please install Python 3.10 or newer (3.12 recommended)."
+        return 1
+    fi
 }
 
 # Setup virtual environment
@@ -767,7 +784,8 @@ main() {
         -c|--config)
             # Setup minimal environment to get paths for config display
             local python_cmd
-            python_cmd=$(find_python) || exit 1
+            find_python_display || exit 1
+            python_cmd=$(find_python_cmd)
             local new_python_cmd
             new_python_cmd=$(setup_venv "$python_cmd")
             python_cmd="$new_python_cmd"
@@ -809,8 +827,9 @@ main() {
     cleanup_docker
     
     # Step 2: Find Python
+    find_python_display || exit 1
     local python_cmd
-    python_cmd=$(find_python) || exit 1
+    python_cmd=$(find_python_cmd)
     
     # Step 3: Setup environment file
     setup_env_file || exit 1
