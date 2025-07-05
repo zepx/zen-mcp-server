@@ -248,7 +248,7 @@ class VertexAIProvider(GeminiModelProvider):
 
             if respect_restrictions:
                 restriction_service = get_restriction_service()
-                if not restriction_service.is_allowed(ProviderType.VERTEX_AI, model_name, model_name):
+                if not restriction_service.is_allowed(ProviderType.VERTEX_AI, model_name):
                     continue
 
             models.append(model_name)
